@@ -3,7 +3,7 @@ PYTHON ?= python3
 CLI    := ./collector/bin/performer
 RUNS   ?= ./runs
 
-.PHONY: help test check target fake profiles inspect clean
+.PHONY: help test check target fake profiles inspect viewer clean
 
 help:
 	@echo "make test     run the test suite (no dependencies)"
@@ -11,6 +11,7 @@ help:
 	@echo "make target   build tests/target/contention (needs a C++ compiler)"
 	@echo "make fake     write a synthetic bundle into $(RUNS)"
 	@echo "make inspect  inspect every bundle in $(RUNS)"
+	@echo "make viewer   build viewer/dist/index.html (needs npm)"
 	@echo "make clean    remove $(RUNS) and __pycache__"
 
 test:
@@ -34,6 +35,9 @@ profiles:
 
 inspect:
 	@for b in $(RUNS)/*.tgz; do $(CLI) inspect "$$b"; echo; done
+
+viewer:
+	cd viewer && npm install --no-audit --no-fund && npm run build && npm test
 
 clean:
 	rm -rf $(RUNS)

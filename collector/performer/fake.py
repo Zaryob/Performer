@@ -92,6 +92,64 @@ def _jitter(rng: random.Random, value: int, spread: float = 0.15) -> int:
     return max(1, int(value * (1.0 + rng.uniform(-spread, spread))))
 
 
+#: Leaf frames appended to some stacks so the tree branches the way a real one
+#: does, rather than being the same few paths repeated per thread.
+_LEAF_VARIANTS: Sequence[str] = (
+    "",
+    ";memcpy",
+    ";operator new(unsigned long);_int_malloc",
+    ";std::_Rb_tree_increment(std::_Rb_tree_node_base const*)",
+    ";__memmove_avx_unaligned_erms",
+    ";std::vector<int, std::allocator<int> >::_M_realloc_insert(int const&)",
+)
+
+
+def _spread_over_threads(
+    rng: random.Random,
+    templates: Sequence[Tuple[str, int]],
+    roster: Sequence[Tuple[int, str]],
+    broken_stacks: bool = False,
+) -> List[Tuple[str, int]]:
+    """Turn a handful of stack templates into a per thread profile.
+
+    The templates carry the shape -- which call paths exist and roughly how
+    expensive each is -- and this spreads them across the real thread roster
+    with the leaf variation and the long tail a genuine profile has.
+
+    ``broken_stacks`` models a target built without frame pointers. That does
+    not add unresolved stacks alongside good ones: it means the walker gets a
+    frame or two and then gives up, so the *same* stacks come back truncated
+    and capped with ``[unknown]``. Reproducing it that way is what makes the
+    unknown frame ratio -- and therefore the viewer's red flag -- behave the
+    way it will on a real unresolvable target.
+    """
+    folded: List[Tuple[str, int]] = []
+    for _tid, thread_name in roster:
+        # Not every thread walks every path, and the busiest few dominate.
+        weight = rng.choice((0.02, 0.05, 0.1, 0.3, 1.0, 1.0, 2.5))
+        for stack, base in templates:
+            if rng.random() > 0.55:
+                continue
+            root, _, tail = stack.partition(";")
+            # The template's own root is the process name, which the thread
+            # name replaces -- except for a single frame template such as
+            # "[unknown]", which has no process prefix to replace.
+            frames = (tail if tail else root).split(";")
+            if broken_stacks:
+                keep = rng.randint(0, 1)
+                frames = frames[:keep] + ["[unknown]"] * rng.randint(1, 3)
+            else:
+                leaf = rng.choice(_LEAF_VARIANTS)
+                if leaf:
+                    frames = frames + leaf.lstrip(";").split(";")
+            scaled = max(1, int(base * weight / max(1, len(roster) // 12)))
+            folded.append(
+                (";".join([thread_name, *frames]), _jitter(rng, scaled))
+            )
+    folded.sort(key=lambda item: (-item[1], item[0]))
+    return folded
+
+
 def _pow2_buckets(
     rng: random.Random, *, peak_us: int, total: int, high_tail: bool
 ) -> List[Dict[str, Any]]:
@@ -287,19 +345,19 @@ def generate(
     # -- stacks --------------------------------------------------------
     # Enough of a boost to push the unknown frame ratio past the 30% line the
     # viewer red flags, which is the whole point of --bad-frame-pointers.
-    unknown_boost = 70 if bad_frame_pointers else 1
-    oncpu = [
-        (stack, _jitter(rng, value * (unknown_boost if "[unknown]" in stack else 1)))
-        for stack, value in _ONCPU_STACKS
-    ]
+    # Spread across the roster rather than a handful of lines: a profile of a
+    # 315 thread process holds thousands of distinct stacks, and a viewer that
+    # has only ever been shown eight has not been shown the problem it exists
+    # to solve.
+    oncpu = _spread_over_threads(rng, _ONCPU_STACKS, roster, bad_frame_pointers)
     builder.add_folded(layout.STACK_ONCPU, oncpu)
     builder.add_folded(
         layout.STACK_OFFCPU,
-        [(stack, _jitter(rng, value)) for stack, value in _OFFCPU_STACKS],
+        _spread_over_threads(rng, _OFFCPU_STACKS, roster, bad_frame_pointers),
     )
     builder.add_folded(
         layout.STACK_FUTEX,
-        [(stack, _jitter(rng, value)) for stack, value in _FUTEX_STACKS],
+        _spread_over_threads(rng, _FUTEX_STACKS, roster, bad_frame_pointers),
     )
 
     # -- histograms and tables ----------------------------------------
@@ -544,10 +602,15 @@ def generate(
         )
 
     # -- manifest ------------------------------------------------------
-    total_frames = sum(value for _stack, value in oncpu)
-    unknown_frames = sum(
-        value for stack, value in oncpu if stack.startswith("[unknown]")
-    )
+    # Counted the same way the real collector counts it (parse.stacks.
+    # FoldStats): frames, weighted by how often the stack was sampled, so one
+    # broken stack seen a thousand times outweighs a good one seen once.
+    total_frames = 0
+    unknown_frames = 0
+    for stack, value in oncpu:
+        frames = stack.split(";")
+        total_frames += value * len(frames)
+        unknown_frames += value * sum(1 for frame in frames if frame == "[unknown]")
     ratio = round(unknown_frames / total_frames, 4) if total_frames else 0.0
 
     document = build_manifest(

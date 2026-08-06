@@ -1,23 +1,69 @@
 # viewer/ — static analysis UI
 
-Empty until **M3**. Vite + React + TypeScript, d3 for the flame graphs (drawn
-by hand: `d3-flame-graph` cannot express the differential mode M4 needs),
-`pako` for un-gzipping bundles in the browser, Tailwind for styling.
+Vite + React + TypeScript, built to a **single self-contained `dist/index.html`**.
 
-Hard constraints:
+```console
+$ npm install
+$ npm run build     # -> dist/index.html
+$ npm test          # unit tests for the parsing and quality logic
+$ node verify.mjs ../runs/performer-*.tgz   # end to end, in a real browser
+```
 
-* **No backend.** Bundles are parsed entirely client-side.
-* **Must work from `file://`.** `viewer/dist/index.html` opened by double-click
-  has to work, so bundles arrive by file picker or drag-and-drop — never
-  `fetch()`, which `file://` forbids.
-* `viewer/dist/` is committed to the repository so the analysis machine needs
-  no toolchain.
+Then open `dist/index.html` by double clicking it. That is the whole
+deployment: the analysis machine needs a browser and nothing else.
 
-Screens: Runs, Overview (with the automatic verdict sentence), Flame
-(on-CPU / off-CPU / futex, with a thread-name filter and an "hide idle threads"
-switch — without them a 315-thread graph is unreadable), Diff, Threads, Locks,
-Wakeups, Timeline.
+## Constraints that shaped it
 
-The viewer reads the format described in [`../docs/bundle-format.md`](../docs/bundle-format.md)
-and must apply the same quality thresholds as `collector/performer/report.py`.
-`performer fake-run` produces realistic input to develop against.
+**It must work from `file://`.** Not a preference — the analysis machine is
+assumed to have no server, no toolchain and possibly no network. `file://`
+forbids `fetch()` *and* refuses to load ES modules, so the build inlines
+everything into one HTML file (`vite-plugin-singlefile`). There is no `fetch`
+anywhere in the source; bundles arrive only through the file picker or
+drag-and-drop.
+
+**No backend.** Bundles are un-gzipped (`pako`) and un-tarred in the browser.
+The tar reader is written here rather than pulled in, because a bundle is a
+file that arrived from another machine: link members, device members, `..`
+components and multi-root archives are all rejected. Python's `tarfile` writes
+PAX headers by default, so those are understood too.
+
+**A 315 thread profile has to stay readable.** Two things follow. The graph is
+drawn on a canvas rather than as SVG — tens of thousands of DOM rects take
+seconds to lay out and stutter afterwards. And the thread frame is merged away
+by default: with 315 roots, a call path taken by every thread is drawn 315
+times and none of the slivers is wide enough to read. Merging answers "where
+does the time go"; the thread filter answers "which thread" once there is a
+reason to ask.
+
+**Unusable data must not be drawn as if it were fine.** A run whose stacks
+could not be resolved gets a banner on the graph itself, not just a flag on
+another screen. The thresholds live in `src/quality.ts` and mirror
+`collector/performer/report.py`.
+
+## Screens
+
+| screen | state |
+|---|---|
+| Runs | loaded bundles, quality flags, select one |
+| Overview | run summary, probe table, quality block, artifacts |
+| Flame | on-CPU / off-CPU / futex, search, zoom, icicle, thread filter, hide idle |
+| Threads | every thread with CPU and runqueue time, sortable |
+| Diff | M4 |
+| Locks, Wakeups, Timeline | M5 |
+
+## Layout
+
+```
+src/
+  bundle/types.ts     the bundle format as TypeScript, mirroring schema/
+  bundle/untar.ts     ustar + PAX reader, defensive
+  bundle/load.ts      File -> Bundle, and the accessors
+  bundle/folded.ts    folded stacks -> flame tree, filters, search
+  quality.ts          the thresholds, mirroring the collector
+  components/         FlameGraph (canvas), shared UI
+  screens/            Runs, Overview, Flame, Threads
+verify.mjs            drives a real browser over file:// and times the render
+```
+
+`dist/` is committed so the analysis machine needs no toolchain. Rebuild it
+whenever `src/` changes.

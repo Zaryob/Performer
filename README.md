@@ -30,18 +30,18 @@ lab box, so it uses **nothing outside the Python standard library** — no pip,
 no virtualenv, no network. The viewer is a static bundle that works from
 `file://`, so it needs no server and parses bundles entirely client-side.
 
-## Status: M2 complete
+## Status: M3 complete
 
-M0 fixed the contract, M1 made one probe real, M2 completes the collector: the
-full probe set, three overhead tiers as YAML, and parsers for every shape
-bpftrace prints.
+M0 fixed the contract, M1 made one probe real, M2 completed the collector, and
+M3 makes the data readable: a static viewer that opens by double click and
+renders a 315-thread profile in a fifth of a second.
 
 | Milestone | Scope | State |
 |---|---|---|
 | **M0** | Repo skeleton, bundle format, `manifest.schema.json`, `inspect`/`validate`/`fake-run` | **done** |
 | **M1** | `preflight.py`, `collect` with `oncpu.bt`, folded stacks, real bundles | **done** |
 | **M2** | Full probe set, YAML profiles, histogram/table parsers, partial bundles | **done** |
-| M3 | Viewer: bundle loading, Overview, Flame, Threads | todo |
+| **M3** | Viewer: bundle loading, Overview, Flame (filter + search), Threads | **done** |
 | M4 | Diff screen, differential flame graph, normalisation | todo |
 | M5 | Locks table, wakeup graph, automatic verdict sentence | todo |
 | M6 | localhost daemon, click-to-collect | todo |
@@ -203,6 +203,36 @@ an error-level flag exit 1, which is what a future CI gate would use.
 
 Bundles are accepted as either a `.tgz` or an unpacked run directory.
 
+## Viewing
+
+```console
+$ open viewer/dist/index.html      # or just double click it
+```
+
+That is the entire deployment. `dist/index.html` is one self-contained file —
+no server, no toolchain, no network — and bundles are read in the browser
+through the file picker or by dropping them on the page. Nothing is uploaded,
+because there is nowhere to upload to.
+
+| screen | what it answers |
+|---|---|
+| **Runs** | which bundles are loaded, and which of them can be trusted |
+| **Overview** | what this run measured, which probes delivered, and the quality block |
+| **Flame** | where the time goes — on-CPU, off-CPU or futex, with search, zoom, icicle mode, a thread filter and an idle-thread cutoff |
+| **Threads** | every thread's CPU and runqueue time, sortable — read from `/proc`, so it survives total probe failure |
+
+Two decisions the 315-thread case forced. The graph is drawn on a **canvas**,
+not as SVG: tens of thousands of DOM rects take seconds to lay out and stutter
+on every interaction afterwards. And the **thread frame is merged away by
+default** — with 315 roots, a call path taken by every thread is drawn 315
+times and none of the slivers is wide enough to read. Merging answers "where
+does the time go"; the thread filter answers "which thread" once there is a
+reason to ask.
+
+A run whose stacks could not be resolved gets a banner **on the graph itself**,
+not just a flag elsewhere: a flame graph over `[unknown]` frames looks exactly
+like a real one, which is what makes it dangerous.
+
 ## Bundle format
 
 Full contract: [`docs/bundle-format.md`](docs/bundle-format.md). In brief:
@@ -270,7 +300,12 @@ collector/
   profiles/*.yaml       light / standard / deep overhead tiers
 probes/*.bt             the eight probe programs
 schema/                 JSON Schemas — the machine-readable contract
-viewer/                 M3: Vite + React + TypeScript, built to viewer/dist
+viewer/                 Vite + React + TypeScript, built to one HTML file
+  src/bundle/           tar + gzip + folded-stack parsing, all client side
+  src/quality.ts        the same thresholds the collector applies
+  src/components/       canvas flame graph
+  src/screens/          Runs, Overview, Flame, Threads
+  verify.mjs            drives a real browser over file:// and times the render
 docs/bundle-format.md   the human-readable contract
 tests/target/           a C++ workload with a known bottleneck
 tests/                  stdlib unittest, no test dependencies
@@ -283,8 +318,8 @@ $ make check         # builds the C++ target, then runs everything
 $ make test          # or: python3 -m unittest discover -s tests -t .
 ```
 
-281 tests, no test dependencies, under three minutes. What they actually
-exercise:
+283 Python tests (no test dependencies, under three minutes) plus 42 viewer
+tests. What they actually exercise:
 
 * **Parsing** against captured bpftrace output from two release generations
   (`tests/fixtures/bpftrace/`), including the cases that break naive parsers:
@@ -305,9 +340,15 @@ exercise:
   test double that reproduces the behaviours the collector depends on, most
   importantly that a probe writes its maps *only* when SIGINTed.
 
+* **The viewer**, in two layers: unit tests for the tar reader (including PAX
+  headers, link members and traversal paths), the folded-stack tree and the
+  quality thresholds; and `viewer/verify.mjs`, which drives a real Chromium
+  against the built `file://` page, loads real bundles through the file picker,
+  and measures the render.
+
 There is no bpftrace in CI, so the eBPF layer is the one thing stubbed. Every
 other stage — process groups, signals, `/proc`, parsing, bundle writing,
-validation — runs for real.
+validation, and the browser itself — runs for real.
 
 ## Deviations from the source specification
 
@@ -344,6 +385,11 @@ literally.
    name with a pointer to M2 rather than silently running a different probe
    set. M2 brings the YAML definitions — and, because of the stdlib-only rule,
    its own small YAML reader.
+8. **The flame graph uses no d3.** The spec says to draw it by hand rather than
+   with `d3-flame-graph`, which cannot express M4's differential mode — that
+   part is honoured. But once the renderer is a canvas, d3 contributes nothing
+   a few lines of arithmetic do not, so a quarter of a megabyte of dependency
+   would be paid for nothing in a file that has to be opened offline.
 
 ## Licence
 

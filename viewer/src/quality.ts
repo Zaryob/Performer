@@ -1,0 +1,169 @@
+/**
+ * Quality flags.
+ *
+ * These thresholds and messages mirror `collector/performer/report.py`. They
+ * are duplicated because the two halves of the project share no runtime, and
+ * duplication that drifts is worse than none -- so the numbers live at the top
+ * of both files, and the collector's `inspect` output is the reference when
+ * they need changing.
+ */
+
+import type { Manifest } from "./bundle/types";
+
+export const THRESHOLDS = {
+  /** Above this, flame graphs are actively misleading rather than merely poor. */
+  unknownFrameRatioError: 0.3,
+  unknownFrameRatioWarn: 0.1,
+  overheadPctWarn: 15,
+  overheadPctError: 30,
+} as const;
+
+export type FlagLevel = "error" | "warn" | "info";
+
+export interface Flag {
+  level: FlagLevel;
+  code: string;
+  message: string;
+  hint?: string;
+}
+
+const ORDER: Record<FlagLevel, number> = { error: 0, warn: 1, info: 2 };
+
+const percent = (value: number, digits = 0) => `${(value * 100).toFixed(digits)}%`;
+
+export function qualityFlags(manifest: Manifest): Flag[] {
+  const flags: Flag[] = [];
+  const quality = manifest.quality;
+
+  if (quality.unknown_frame_ratio > THRESHOLDS.unknownFrameRatioError) {
+    flags.push({
+      level: "error",
+      code: "unknown_frames",
+      message: `${percent(
+        quality.unknown_frame_ratio,
+      )} of sampled frames are [unknown]; flame graphs are misleading`,
+      hint: "Rebuild the target with -fno-omit-frame-pointer, or collect with DWARF unwinding.",
+    });
+  } else if (quality.unknown_frame_ratio > THRESHOLDS.unknownFrameRatioWarn) {
+    flags.push({
+      level: "warn",
+      code: "unknown_frames",
+      message: `${percent(quality.unknown_frame_ratio)} of sampled frames are [unknown]`,
+      hint: "Deep leaf frames may be attributed to the wrong caller.",
+    });
+  }
+
+  if (quality.frame_pointers_ok === false) {
+    flags.push({
+      level: "error",
+      code: "frame_pointers",
+      message: "preflight decided frame pointers are missing",
+      hint: "Rebuild the target with -fno-omit-frame-pointer.",
+    });
+  }
+  if (quality.ignore_quality) {
+    flags.push({
+      level: "warn",
+      code: "ignore_quality",
+      message: "collected with --ignore-quality; the frame pointer check was overridden",
+    });
+  }
+
+  const overhead = quality.estimated_overhead_pct;
+  if (overhead > THRESHOLDS.overheadPctError) {
+    flags.push({
+      level: "error",
+      code: "overhead",
+      message: `estimated overhead ${overhead.toFixed(
+        1,
+      )}% -- the measurement changed the workload`,
+      hint: "Use a lighter profile or a shorter duration before drawing conclusions.",
+    });
+  } else if (overhead > THRESHOLDS.overheadPctWarn) {
+    flags.push({
+      level: "warn",
+      code: "overhead",
+      message: `estimated overhead ${overhead.toFixed(1)}%`,
+      hint: "Comparisons against a run with different overhead are unreliable.",
+    });
+  }
+
+  if (manifest.status === "failed") {
+    flags.push({
+      level: "error",
+      code: "run_failed",
+      message: "no probe produced usable data",
+    });
+  } else if (manifest.status === "partial") {
+    flags.push({
+      level: "warn",
+      code: "run_partial",
+      message: "run is incomplete; see the probe table",
+    });
+  }
+
+  if (manifest.target_died_at) {
+    flags.push({
+      level: "warn",
+      code: "target_died",
+      message: `target process exited during the run at ${manifest.target_died_at}`,
+    });
+  }
+
+  for (const probe of manifest.probes ?? []) {
+    if (probe.status === "failed") {
+      flags.push({
+        level: "error",
+        code: "probe_failed",
+        message: `probe '${probe.name}' produced nothing`,
+      });
+    } else if (probe.status === "partial") {
+      flags.push({
+        level: "warn",
+        code: "probe_partial",
+        message: `probe '${probe.name}' is partial`,
+      });
+    }
+    if (probe.events_lost) {
+      flags.push({
+        level: "warn",
+        code: "events_lost",
+        message: `probe '${probe.name}' lost ${probe.events_lost.toLocaleString()} events; its totals are a lower bound`,
+        hint: "Raise BPFTRACE_MAX_MAP_KEYS or narrow the probe's filter.",
+      });
+    }
+    if (probe.exit_reason === "sigkill") {
+      flags.push({
+        level: "error",
+        code: "probe_sigkill",
+        message: `probe '${probe.name}' was SIGKILLed, so bpftrace never dumped its maps`,
+      });
+    }
+  }
+
+  for (const note of quality.notes ?? []) {
+    flags.push({ level: "warn", code: "quality_note", message: note });
+  }
+  for (const warning of manifest.warnings ?? []) {
+    flags.push({ level: "warn", code: "run_warning", message: warning });
+  }
+
+  flags.sort((a, b) => ORDER[a.level] - ORDER[b.level]);
+  return flags;
+}
+
+export function worstLevel(flags: Flag[]): FlagLevel | null {
+  if (!flags.length) return null;
+  return flags.reduce<FlagLevel>(
+    (worst, flag) => (ORDER[flag.level] < ORDER[worst] ? flag.level : worst),
+    "info",
+  );
+}
+
+/** True when the stacks in this run cannot carry an argument. */
+export function stacksAreTrustworthy(manifest: Manifest): boolean {
+  return (
+    manifest.quality.frame_pointers_ok !== false &&
+    manifest.quality.unknown_frame_ratio <= THRESHOLDS.unknownFrameRatioError
+  );
+}

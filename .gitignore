@@ -6,9 +6,11 @@ __pycache__/
 /runs/
 *.tgz
 
-# Viewer (M3) -- note that viewer/dist IS committed, per the spec.
+# Viewer: dist/ IS committed on purpose -- the analysis machine has no
+# toolchain, so the built single file is the deliverable.
 viewer/node_modules/
 viewer/.vite/
+viewer/verify-*.png
 
 # Built test target (source is tracked, the binary is not).
 /tests/target/contention
