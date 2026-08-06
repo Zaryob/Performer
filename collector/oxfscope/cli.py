@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
-from . import __version__, layout
+from . import __version__, layout, profiles
 from .bundle import Bundle
 from .errors import OxfscopeError
 from .report import LEVEL_ERROR, build_summary, render, summary_json
@@ -25,7 +25,6 @@ EXIT_FAILURE = 1
 EXIT_NOT_IMPLEMENTED = 3
 
 _NOT_IMPLEMENTED = {
-    "collect": "M1/M2 -- probe execution is not implemented yet",
     "diff": "M4 -- run comparison is not implemented yet",
     "daemon": "M6 -- the localhost API is not implemented yet",
 }
@@ -47,6 +46,81 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"oxfscope {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="<command>")
+
+    collect = sub.add_parser(
+        "collect",
+        help="measure a running process and write a run bundle",
+        description=(
+            "Attaches the profile's probes to a running process, collects for "
+            "the requested duration, and writes a run bundle. Requires root "
+            "(or CAP_BPF + CAP_PERFMON) and bpftrace on the target machine."
+        ),
+    )
+    collect.add_argument("--pid", type=int, required=True, help="target process id")
+    duration_group = collect.add_mutually_exclusive_group()
+    duration_group.add_argument(
+        "--duration", type=float, default=60.0, help="seconds to collect (default 60)"
+    )
+    duration_group.add_argument(
+        "--until-exit",
+        action="store_true",
+        help="collect until the target process exits",
+    )
+    collect.add_argument(
+        "--profile",
+        default=profiles.DEFAULT_PROFILE,
+        help=f"collection profile (available: {', '.join(sorted(profiles.available()))})",
+    )
+    collect.add_argument("--label", required=True, help="short name for this run")
+    collect.add_argument("--tag", action="append", default=[], dest="tags")
+    collect.add_argument("--notes", default="", help="free text stored in the manifest")
+    collect.add_argument("--out", type=Path, default=Path("./runs"))
+    collect.add_argument(
+        "--ignore-quality",
+        action="store_true",
+        help="collect even if the frame pointer check fails (stacks will be unusable)",
+    )
+    collect.add_argument(
+        "--force",
+        action="store_true",
+        help="override the profile's duration limit and failed probe smoke tests",
+    )
+    collect.add_argument(
+        "--overhead-window",
+        type=float,
+        default=5.0,
+        metavar="S",
+        help="seconds of CPU sampling before and after the run (0 disables)",
+    )
+    collect.add_argument(
+        "--annotate-kernel",
+        action="store_true",
+        help="suffix kernel frames with _[k] in the folded stacks",
+    )
+    collect.add_argument(
+        "--keep-raw-stdout",
+        action="store_true",
+        help="keep each probe's raw map dump in raw/ (large)",
+    )
+    collect.add_argument("--no-pack", action="store_true", help="leave the run unpacked")
+    collect.add_argument(
+        "--bpftrace", default=None, help="path to the bpftrace binary to use"
+    )
+    collect.set_defaults(func=_cmd_collect)
+
+    preflight = sub.add_parser(
+        "preflight",
+        help="run the environment checks against a target without collecting",
+    )
+    preflight.add_argument("--pid", type=int, required=True)
+    preflight.add_argument("--profile", default=profiles.DEFAULT_PROFILE)
+    preflight.add_argument(
+        "--skip-trials",
+        action="store_true",
+        help="skip the frame pointer and smoke test probe runs",
+    )
+    preflight.add_argument("--json", action="store_true")
+    preflight.set_defaults(func=_cmd_preflight)
 
     inspect = sub.add_parser(
         "inspect",
@@ -137,6 +211,49 @@ def _build_parser() -> argparse.ArgumentParser:
 # --------------------------------------------------------------------------
 # commands
 # --------------------------------------------------------------------------
+
+
+def _cmd_collect(args: argparse.Namespace) -> int:
+    from .collect import CollectOptions, collect
+
+    options = CollectOptions(
+        pid=args.pid,
+        label=args.label,
+        out_dir=args.out,
+        profile_name=args.profile,
+        duration_s=None if args.until_exit else args.duration,
+        tags=args.tags,
+        notes=args.notes,
+        ignore_quality=args.ignore_quality,
+        force=args.force,
+        overhead_window_s=args.overhead_window,
+        keep_raw_stdout=args.keep_raw_stdout,
+        pack=not args.no_pack,
+        annotate_kernel=args.annotate_kernel,
+        bpftrace=args.bpftrace,
+    )
+    result = collect(options)
+    print()
+    print(f"run directory: {result.run_dir}")
+    if result.archive is not None:
+        print(f"bundle:        {result.archive}")
+    print(f"status:        {result.manifest['status']}")
+    print(f"inspect with:  {_prog_name()} inspect {result.archive or result.run_dir}")
+    return EXIT_OK
+
+
+def _cmd_preflight(args: argparse.Namespace) -> int:
+    from . import preflight as preflight_mod
+
+    profile = profiles.load(args.profile)
+    report = preflight_mod.run_preflight(
+        args.pid, profile, skip_trials=args.skip_trials
+    )
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2))
+    else:
+        print(preflight_mod.render(report))
+    return EXIT_OK if report.ok else EXIT_FAILURE
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:

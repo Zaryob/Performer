@@ -3,11 +3,12 @@ PYTHON ?= python3
 CLI    := ./collector/bin/performer
 RUNS   ?= ./runs
 
-.PHONY: help test check fake inspect clean
+.PHONY: help test check target fake inspect clean
 
 help:
 	@echo "make test     run the test suite (no dependencies)"
-	@echo "make check    byte-compile the collector and run the tests"
+	@echo "make check    build the target, byte-compile, run the tests"
+	@echo "make target   build tests/target/contention (needs a C++ compiler)"
 	@echo "make fake     write a synthetic bundle into $(RUNS)"
 	@echo "make inspect  inspect every bundle in $(RUNS)"
 	@echo "make clean    remove $(RUNS) and __pycache__"
@@ -15,9 +16,14 @@ help:
 test:
 	$(PYTHON) -m unittest discover -s tests -t . -v
 
-check:
+check: target
 	$(PYTHON) -m compileall -q collector/oxfscope
 	$(PYTHON) -m unittest discover -s tests -t .
+
+# The process supervision and /proc tests need a real multi threaded process;
+# without it they skip rather than fail.
+target:
+	$(MAKE) -C tests/target
 
 fake:
 	$(CLI) fake-run --out $(RUNS) --label baseline
@@ -28,4 +34,5 @@ inspect:
 
 clean:
 	rm -rf $(RUNS)
+	$(MAKE) -C tests/target clean
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +

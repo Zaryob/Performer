@@ -1,0 +1,29 @@
+/*
+ * oncpu.bt -- on-CPU sampling profile.
+ *
+ *   $1  target pid (tgid)
+ *   $2  watchdog seconds: the probe exits on its own after this long
+ *
+ * Sampling at 99 Hz rather than 100 Hz avoids locking onto workloads that
+ * themselves run at a round frequency -- with a 315 thread process full of
+ * timers, that is a real risk, not a theoretical one.
+ *
+ * `pid` in bpftrace is the tgid, so this filter catches every thread of the
+ * target and nothing else.
+ *
+ * The collector normally ends this probe with SIGINT, which is the only
+ * moment bpftrace writes its maps out. The interval probe is a watchdog:
+ * if the collector is killed, the probe still stops and still prints,
+ * instead of sampling the target forever.
+ */
+
+profile:hz:99
+/ pid == $1 /
+{
+    @cpu[kstack, ustack, comm] = count();
+}
+
+interval:s:$2
+{
+    exit();
+}

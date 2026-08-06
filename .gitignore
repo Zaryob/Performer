@@ -9,3 +9,6 @@ __pycache__/
 # Viewer (M3) -- note that viewer/dist IS committed, per the spec.
 viewer/node_modules/
 viewer/.vite/
+
+# Built test target (source is tracked, the binary is not).
+/tests/target/contention

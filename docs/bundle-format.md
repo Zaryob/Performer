@@ -149,7 +149,13 @@ The reason a viewer can refuse to draw a graph.
 |---|---|
 | `frame_pointers_ok` | preflight's verdict on whether the target has usable frame pointers |
 | `unknown_frame_ratio` | fraction of sampled frames that are `[unknown]`, 0..1 |
-| `estimated_overhead_pct` | target CPU overhead attributed to the measurement, from `utime+stime` sampled either side of the run |
+| `estimated_overhead_pct` | percentage by which the target's CPU use rose while traced |
+
+`estimated_overhead_pct` compares the target's CPU over the traced window
+against the average of two untraced samples, one taken before the run and one
+after (`quality.overhead.cpu_pct_before` / `cpu_pct_during`). Comparing before
+with after would compare two untraced states and always report roughly zero.
+Negative results clamp to zero — tracing cannot make the target cheaper.
 
 Thresholds applied by `oxfscope/report.py` — and, from M3, by the viewer:
 
@@ -178,9 +184,24 @@ Hisar_Seri_Uret;start_thread;OMThread::execute();OMTimerManager::armTimer();__ll
 * `futex.folded` — microseconds in `futex()`
 * `offwake.folded` — optional, blocked stack plus waker stack
 
-Symbols are demangled at collection time (`c++filt`); the viewer demangles again
-defensively. Values are integers. These files feed `flamegraph.pl` unchanged,
-which is how M1 is verified.
+Frame ordering, which every reader depends on: **thread name first, then the
+user stack root-to-leaf, then the kernel stack on top.** bpftrace prints stacks
+leaf-first, so the collector reverses them.
+
+Normalisation applied when folding (`parse/stacks.py`):
+
+* trailing symbol offsets are stripped (`main+66` and `main+0x42` both become
+  `main`), so two samples in the same function collapse into one path —
+  anchored at the end of the string so `operator+` and `operator++` survive;
+* a trailing module annotation (` (/opt/hisar/bin/app)`) is removed;
+* an address bpftrace could not symbolise (`0x7f3c8a4419a1`) becomes
+  `[unknown]` — named rather than hidden, because it is exactly what the
+  quality block reports;
+* `;` inside a symbol becomes `:`, since it separates frames in this format;
+* kernel frames get a `_[k]` suffix only with `--annotate-kernel`.
+
+Values are integers: sample counts for `oncpu`, microseconds for the others.
+These files feed `flamegraph.pl` unchanged, which is how M1 is verified.
 
 ## hist/*.json
 

@@ -30,28 +30,75 @@ lab box, so it uses **nothing outside the Python standard library** — no pip,
 no virtualenv, no network. The viewer is a static bundle that works from
 `file://`, so it needs no server and parses bundles entirely client-side.
 
-## Status: M0 complete
+## Status: M1 complete
 
-M0 fixes the contract — the bundle layout and the manifest schema — before any
-probe code exists, because everything downstream is written against it.
+M0 fixed the contract — the bundle layout and the manifest schema. M1 makes it
+real: preflight, one probe (`oncpu.bt`), and an actual measurement of an actual
+process, end to end.
 
 | Milestone | Scope | State |
 |---|---|---|
 | **M0** | Repo skeleton, bundle format, `manifest.schema.json`, `inspect`/`validate`/`fake-run` | **done** |
-| M1 | `preflight.py`, single probe (`oncpu.bt`) end to end | todo |
-| M2 | Full probe set, profiles, process supervision, partial bundles | todo |
+| **M1** | `preflight.py`, `collect` with `oncpu.bt`, folded stacks, real bundles | **done** |
+| M2 | Full probe set, YAML profiles, histogram parsers | todo |
 | M3 | Viewer: bundle loading, Overview, Flame, Threads | todo |
 | M4 | Diff screen, differential flame graph, normalisation | todo |
 | M5 | Locks table, wakeup graph, automatic verdict sentence | todo |
 | M6 | localhost daemon, click-to-collect | todo |
 
-`collect`, `diff` and `daemon` are registered as commands today and exit with
-code 3 and an explicit "not implemented in this milestone" message. They never
-pretend to have worked.
+`diff` and `daemon` are registered as commands today and exit with code 3 and
+an explicit "not implemented in this milestone" message. They never pretend to
+have worked. The `light`/`standard`/`deep` profiles are refused by name until
+M2 defines them, rather than silently running something else.
 
-## Quick start
+## Collecting
 
-No installation. Clone and run:
+On the target machine, as root, with bpftrace installed (output below is
+illustrative — the numbers come from a real run's shape, not a specific one):
+
+```console
+$ ./collector/bin/performer collect --pid 205852 --duration 30 \
+      --label baseline --tag before-timer-fix --out ./runs
+preflight: pid 205852, profile 'oncpu'
+preflight
+  [ok] privileges             sufficient privileges (root)
+  [ok] bpftrace               bpftrace 0.20.2 at /usr/bin/bpftrace
+  [ok] target                 pid 205852 is 'Hisar_Seri_Uret' with 316 threads
+  [ok] nofile                 RLIMIT_NOFILE soft limit 20000 covers the estimated need (5056)
+  [ok] perf_event_paranoid    kernel.perf_event_paranoid = 2
+  [ok] frame_pointers         stacks resolve (0.4% unknown frames over 2946 samples)
+  [ok] smoke:oncpu            probe 'oncpu' attached and produced output
+run 20260806T045451Z-baseline
+  probe 'oncpu' attached (pid 26957)
+stopping probes after 30.0s (duration)
+  stacks/oncpu.folded: 1841 stacks, 291043 samples, 0.4% unknown frames
+
+status:        ok
+```
+
+Preflight refuses to start a measurement that cannot produce a usable answer.
+Above 30% unresolved frames it stops and tells you to rebuild with
+`-fno-omit-frame-pointer`; `--ignore-quality` overrides that and marks the
+bundle accordingly. A probe that fails its two-second smoke test is recorded as
+`failed`, never skipped quietly.
+
+The resulting `stacks/oncpu.folded` feeds FlameGraph unchanged:
+
+```console
+$ tar xzf runs/oxfscope-*-baseline.tgz
+$ flamegraph.pl run_*/stacks/oncpu.folded > baseline.svg
+```
+
+Other collection modes:
+
+```console
+$ performer collect --pid 205852 --until-exit --label full-run   # until the target exits
+$ performer preflight --pid 205852                               # just the checks
+```
+
+## Quick start without a target
+
+No installation, no bpftrace, no root:
 
 ```console
 $ ./collector/bin/performer fake-run --out ./runs --label baseline
@@ -115,11 +162,13 @@ an error-level flag exit 1, which is what a future CI gate would use.
 
 | Command | Purpose |
 |---|---|
+| `collect --pid N --label L` | Measure a running process into a bundle. `--duration`/`--until-exit`, `--profile`, `--tag`, `--ignore-quality`, `--force`, `--overhead-window`, `--keep-raw-stdout`, `--annotate-kernel` |
+| `preflight --pid N` | Run the environment checks without collecting. `--skip-trials`, `--json` |
 | `inspect <bundle>...` | Manifest summary, quality flags, schema check. `--json`, `--strict`, `--verbose`, `--no-validate` |
 | `validate <bundle>...` | Schema + cross-field validation only, exit 1 on failure. `--verify-hashes` |
 | `fake-run` | Write a synthetic bundle. `--degraded`, `--bad-frame-pointers`, `--threads`, `--seed`, `--no-pack` |
 | `schema [name]` | Show or print the schemas this build enforces |
-| `collect` / `diff` / `daemon` | Registered, not implemented (exit 3) |
+| `diff` / `daemon` | Registered, not implemented (exit 3) |
 
 Bundles are accepted as either a `.tgz` or an unpacked run directory.
 
@@ -173,27 +222,54 @@ treated as parsing untrusted input:
 ```
 collector/
   bin/oxfscope          entry point (+ performer symlink); no install needed
-  oxfscope/             the package: bundle.py, manifest.py, jsonschema.py,
-                        layout.py, report.py, fake.py, cli.py
-  profiles/             M2: light/standard/deep profile definitions
-probes/                 M2: bpftrace programs
+  oxfscope/
+    layout.py           every bundle-relative path, named once
+    jsonschema.py       stdlib-only JSON Schema subset validator
+    manifest.py         manifest assembly and cross-field rules
+    bundle.py           build, pack and (defensively) read bundles
+    proc.py             /proc readers: threads, schedstat, CPU, cgroups
+    preflight.py        the seven environment checks
+    profiles.py         probe sets and overhead tiers
+    runner.py           probe supervision, signals, watcher, 1 Hz sampler
+    parse/stacks.py     bpftrace stack maps -> FlameGraph folded
+    collect.py          the measurement itself
+    report.py           inspect rendering and quality thresholds
+    fake.py, cli.py
+  profiles/             M2: light/standard/deep YAML definitions
+probes/oncpu.bt         on-CPU sampling; the rest arrive in M2
 schema/                 JSON Schemas — the machine-readable contract
 viewer/                 M3: Vite + React + TypeScript, built to viewer/dist
 docs/bundle-format.md   the human-readable contract
+tests/target/           a C++ workload with a known bottleneck
 tests/                  stdlib unittest, no test dependencies
 ```
 
 ## Tests
 
 ```console
+$ make check         # builds the C++ target, then runs everything
 $ make test          # or: python3 -m unittest discover -s tests -t .
 ```
 
-84 tests, no dependencies, under a second. They cover the schema validator, the
-manifest cross-field rules (via `tests/fixtures/manifest/valid_*.json` and
-`invalid_*.json`, each of the latter carrying a `_why_invalid` note), bundle
-build/pack/read round-trips, the hostile-archive cases above, and every CLI
-exit code.
+193 tests, no test dependencies, about 80 seconds. What they actually exercise:
+
+* **Parsing** against captured bpftrace output from two release generations
+  (`tests/fixtures/bpftrace/`), including the cases that break naive parsers:
+  C++ symbols containing commas, `operator+`, hex offsets, module suffixes,
+  unresolved addresses, empty stacks and truncated output.
+* **The contract**: schema validator, manifest cross-field rules
+  (`tests/fixtures/manifest/valid_*.json` and `invalid_*.json`, each of the
+  latter carrying a `_why_invalid` note), bundle round-trips, hostile archives.
+* **A real process**: `/proc` readers, thread inventory and series run against
+  `tests/target/contention`, a C++ program with 8–315 real threads.
+* **Real process supervision**: SIGINT/SIGTERM/SIGKILL escalation, process
+  groups, target death, pid recycling — driven by `tests/fake_bpftrace.py`, a
+  test double that reproduces the behaviours the collector depends on, most
+  importantly that a probe writes its maps *only* when SIGINTed.
+
+There is no bpftrace in CI, so the eBPF layer is the one thing stubbed. Every
+other stage — process groups, signals, `/proc`, parsing, bundle writing,
+validation — runs for real.
 
 ## Deviations from the source specification
 
@@ -219,6 +295,16 @@ literally.
 5. **`label` character set restricted** to `[A-Za-z0-9._-]`. Labels reach file
    names and, at M6, a daemon API; validating at the type level is cheaper than
    remembering to escape.
+6. **Overhead is measured during the run, not just around it.** §5 asks for a
+   5-second CPU sample immediately before and immediately after. Both of those
+   measure the *untraced* target, so their difference is roughly zero whatever
+   the tracing cost. The before/after samples are still taken and recorded, and
+   the estimate compares them against the target's CPU over the traced window
+   itself — which is where the cost is actually paid.
+7. **M1 ships one profile, `oncpu`.** `light`/`standard`/`deep` are refused by
+   name with a pointer to M2 rather than silently running a different probe
+   set. M2 brings the YAML definitions — and, because of the stdlib-only rule,
+   its own small YAML reader.
 
 ## Licence
 

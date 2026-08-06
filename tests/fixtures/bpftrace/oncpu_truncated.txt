@@ -1,0 +1,6 @@
+Attaching 1 probe...
+
+@cpu[
+    frame_a+1
+, 
+    frame_b+2

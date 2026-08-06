@@ -1,0 +1,172 @@
+"""/proc readers, exercised against a real multi threaded process."""
+
+from __future__ import annotations
+
+import os
+import unittest
+
+from oxfscope import proc
+
+from .support import python_sleeper, requires_target, spawn_target
+
+
+class SelfTests(unittest.TestCase):
+    """The current process is a target like any other."""
+
+    def test_stat_of_self(self):
+        stat = proc.read_stat(os.getpid())
+        self.assertIsNotNone(stat)
+        self.assertEqual(stat.pid, os.getpid())
+        self.assertGreaterEqual(stat.num_threads, 1)
+        self.assertGreater(stat.start_time_ticks, 0)
+
+    def test_missing_pid_returns_none_not_an_exception(self):
+        # /proc readers are called in a loop over threads that come and go, so
+        # a vanished pid must be an ordinary None, never a raised exception.
+        dead = 4_194_303  # above the default pid_max
+        self.assertFalse(proc.exists(dead))
+        self.assertIsNone(proc.read_stat(dead))
+        self.assertIsNone(proc.read_comm(dead))
+        self.assertEqual(proc.read_cmdline(dead), [])
+        self.assertIsNone(proc.read_exe(dead))
+        self.assertEqual(proc.thread_ids(dead), [])
+        self.assertEqual(proc.thread_count(dead), 0)
+        self.assertEqual(proc.snapshot_threads(dead), {})
+        self.assertIsNone(proc.read_schedstat(dead))
+
+    def test_comm_with_spaces_and_parens_is_parsed(self):
+        """The classic /proc/pid/stat trap: comm can contain ')' and spaces."""
+        sample = (
+            "1234 (weird ) name) S 1 1234 1234 0 -1 4194304 100 0 0 0 "
+            + " ".join(str(i) for i in range(11, 30))
+            + "\n"
+        )
+        original = proc._read_text
+        proc._read_text = lambda _path: sample
+        try:
+            stat = proc.read_stat(1234)
+        finally:
+            proc._read_text = original
+        self.assertIsNotNone(stat)
+        self.assertEqual(stat.comm, "weird ) name")
+
+    def test_system_info_is_schema_shaped(self):
+        info = proc.system_info(os.getpid())
+        self.assertEqual(info["schema_version"], 1)
+        self.assertTrue(info["kernel"])
+        self.assertGreaterEqual(info["cpu_count"], 1)
+        self.assertIn("cgroup", info)
+
+    def test_capabilities_reports_root_honestly(self):
+        ok, caps = proc.have_capabilities()
+        self.assertEqual(caps["root"], os.geteuid() == 0)
+        if caps["root"]:
+            self.assertTrue(ok)
+
+
+class CpuTests(unittest.TestCase):
+    def test_sample_cpu_measures_a_busy_child(self):
+        sample = proc.sample_cpu(os.getpid(), 0.2)
+        self.assertIsNotNone(sample)
+        self.assertGreaterEqual(sample["cpu_pct"], 0.0)
+        self.assertGreater(sample["window_s"], 0.0)
+
+    def test_cpu_pct_between(self):
+        ticks = proc.CLK_TCK
+        self.assertEqual(proc.cpu_pct_between((0, 0), (ticks, 0), 1.0), 100.0)
+        self.assertEqual(proc.cpu_pct_between((0, 0), (ticks, ticks), 2.0), 100.0)
+        self.assertIsNone(proc.cpu_pct_between(None, (1, 1), 1.0))
+        self.assertIsNone(proc.cpu_pct_between((0, 0), (1, 1), 0))
+
+    def test_overhead_is_relative_to_the_baseline(self):
+        self.assertEqual(proc.overhead_pct(100.0, 110.0), 10.0)
+        self.assertEqual(proc.overhead_pct(200.0, 260.0), 30.0)
+
+    def test_overhead_never_goes_negative(self):
+        # Tracing cannot make the target cheaper; a negative delta is noise.
+        self.assertEqual(proc.overhead_pct(100.0, 90.0), 0.0)
+
+    def test_overhead_without_samples_is_zero(self):
+        self.assertEqual(proc.overhead_pct(None, 50.0), 0.0)
+        self.assertEqual(proc.overhead_pct(50.0, None), 0.0)
+        self.assertEqual(proc.overhead_pct(0.0, 50.0), 0.0)
+
+    def test_mean_cpu_pct_ignores_missing_samples(self):
+        self.assertEqual(proc.mean_cpu_pct([{"cpu_pct": 10.0}, None]), 10.0)
+        self.assertEqual(proc.mean_cpu_pct([{"cpu_pct": 10.0}, {"cpu_pct": 20.0}]), 15.0)
+        self.assertIsNone(proc.mean_cpu_pct([None, {}]))
+
+
+class PidRecyclingTests(unittest.TestCase):
+    def test_same_process_detects_a_changed_start_time(self):
+        pid = os.getpid()
+        stat = proc.read_stat(pid)
+        self.assertTrue(proc.is_same_process(pid, stat.start_time_ticks))
+        # A different start time means the pid was recycled onto another
+        # process, which must not be measured as if it were the target.
+        self.assertFalse(proc.is_same_process(pid, stat.start_time_ticks + 1))
+
+    def test_dead_pid_is_not_the_same_process(self):
+        child = python_sleeper(0.01)
+        child.wait()
+        self.assertFalse(proc.is_same_process(child.pid, 12345))
+
+
+@requires_target
+class RealTargetTests(unittest.TestCase):
+    """Against a process with a few hundred real threads."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._ctx = spawn_target(threads=64, seconds=120, sleep_us=2000)
+        cls.target = cls._ctx.__enter__()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._ctx.__exit__(None, None, None)
+
+    def test_thread_count_matches_the_workload(self):
+        # 64 workers plus the main thread.
+        self.assertEqual(proc.thread_count(self.target.pid), 65)
+        self.assertEqual(len(proc.thread_ids(self.target.pid)), 65)
+
+    def test_thread_names_are_readable(self):
+        snapshot = proc.snapshot_threads(self.target.pid)
+        self.assertEqual(len(snapshot), 65)
+        names = {entry["name"] for entry in snapshot.values()}
+        self.assertIn("worker0", names)
+        self.assertIn("contention", names)  # the main thread
+
+    def test_schedstat_is_aggregated_over_all_threads(self):
+        """The process level file covers only the main thread."""
+        main_only = proc.read_schedstat(self.target.pid)
+        aggregated = proc.aggregate_schedstat(self.target.pid)
+        if main_only is None:
+            self.skipTest("CONFIG_SCHEDSTATS is not enabled on this kernel")
+        self.assertGreater(aggregated.run_ns, main_only.run_ns)
+
+    def test_context_switches_accumulate(self):
+        first = proc.aggregate_ctxt_switches(self.target.pid)
+        self.assertTrue(any(v > 0 for v in first))
+
+    def test_snapshot_merge_marks_arrivals_and_departures(self):
+        start = {1: {"name": "a", "schedstat": None}, 2: {"name": "b", "schedstat": None}}
+        end = {2: {"name": "b", "schedstat": None}, 3: {"name": "c", "schedstat": None}}
+        merged = proc.merge_thread_snapshots(start, end)
+        self.assertEqual(set(merged), {"1", "2", "3"})
+        self.assertTrue(merged["1"]["exited"])
+        self.assertEqual(merged["1"]["first_seen"], "start")
+        self.assertEqual(merged["3"]["first_seen"], "end")
+        self.assertNotIn("exited", merged["2"])
+
+    def test_target_info_carries_what_probes_need(self):
+        info = proc.target_info(self.target.pid)
+        self.assertEqual(info["pid"], self.target.pid)
+        self.assertEqual(info["comm"], "contention")
+        self.assertTrue(info["exe"].endswith("contention"))
+        self.assertIn("--threads", info["cmdline"])
+        self.assertIsNotNone(info["start_time_ticks"])
+
+
+if __name__ == "__main__":
+    unittest.main()

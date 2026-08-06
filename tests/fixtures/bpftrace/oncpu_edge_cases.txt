@@ -1,0 +1,19 @@
+Attaching 1 probe...
+
+@cpu[
+    kernel_frame_no_offset
+, 
+    operator+(Vector const&, Vector const&)+96
+    operator++(Counter&)+12
+    std::vector<std::pair<int, int>, std::allocator<std::pair<int, int> > >::push_back(std::pair<int, int> const&)+204
+    main+66 (/opt/hisar/bin/Hisar_Seri_Uret)
+, weird;comm]: 7
+@cpu[
+, 
+, ]: 3
+@other_map: 99
+@cpu[
+    single_frame+1
+, 
+    single_user+2
+, Worker1]: 1
