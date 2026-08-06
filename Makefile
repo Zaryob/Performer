@@ -3,7 +3,7 @@ PYTHON ?= python3
 CLI    := ./collector/bin/performer
 RUNS   ?= ./runs
 
-.PHONY: help test check target fake inspect clean
+.PHONY: help test check target fake profiles inspect clean
 
 help:
 	@echo "make test     run the test suite (no dependencies)"
@@ -28,6 +28,9 @@ target:
 fake:
 	$(CLI) fake-run --out $(RUNS) --label baseline
 	$(CLI) fake-run --out $(RUNS) --label degraded --degraded --bad-frame-pointers
+
+profiles:
+	@$(CLI) schema >/dev/null && ls collector/profiles/*.yaml
 
 inspect:
 	@for b in $(RUNS)/*.tgz; do $(CLI) inspect "$$b"; echo; done

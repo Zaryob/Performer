@@ -1,0 +1,30 @@
+/*
+ * wakeup.bt -- who wakes whom.
+ *
+ *   $1  target pid (tgid)
+ *   $2  watchdog seconds
+ *
+ * Produces a directed edge list over thread ids. Drawn as a graph, a hub
+ * stands out immediately: a single thread that wakes hundreds of others is
+ * the dispatch point of the whole application, and if that thread is also the
+ * one holding the hot lock, the two findings are the same finding.
+ *
+ * sched_wakeup fires in the waker's context, so `tid` is the waker and
+ * args->pid is the thread being woken. Either end may belong to another
+ * process -- a kernel thread completing I/O, a timer softirq -- and those
+ * edges are kept, because "the target is woken by something outside it" is a
+ * real answer.
+ */
+
+tracepoint:sched:sched_wakeup
+/ args->pid != 0 && (pid == $1 || args->pid == $1) /
+{
+    @wake_cnt[tid, args->pid] = count();
+    @wake_from_comm[comm] = count();
+    @wake_to_comm[args->comm] = count();
+}
+
+interval:s:$2
+{
+    exit();
+}

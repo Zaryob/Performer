@@ -1,0 +1,40 @@
+# Default diagnosis.
+#
+# Adds the probes that answer "what is the application waiting on", which
+# means tracing every context switch and every futex call. On a process with
+# hundreds of threads that is a lot of events, so both blocking probes carry a
+# threshold: intervals shorter than this say nothing and would fill the maps
+# with noise that crowds out the intervals that matter.
+name: standard
+description: "Off-CPU time, lock contention per lock address, and the thread wakeup graph, on top of the light profile. The tier that usually finds the answer."
+expected_overhead: "5-15%"
+max_duration_s: 300
+
+probes:
+  - name: oncpu
+    program: oncpu.bt
+    required: true
+
+  - name: runqlat
+    program: runqlat.bt
+
+  - name: threadlife
+    program: threadlife.bt
+
+  - name: offcpu
+    program: offcpu.bt
+    thresholds:
+      # 100 us: below this the thread was descheduled, not blocked on
+      # anything a human can act on.
+      min_us: 100
+
+  - name: futex
+    program: futex.bt
+    thresholds:
+      # 50 us: an uncontended futex never enters the kernel at all, so
+      # anything that shows up here already lost a race. The threshold only
+      # removes the very fastest of those.
+      min_us: 50
+
+  - name: wakeup
+    program: wakeup.bt

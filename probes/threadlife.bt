@@ -1,0 +1,38 @@
+/*
+ * threadlife.bt -- thread creation and exit.
+ *
+ *   $1  target pid (tgid)
+ *   $2  watchdog seconds
+ *
+ * A pool that churns is a different problem from a pool that is merely large.
+ * The 1 Hz /proc series shows the thread count moving; this shows whether
+ * that movement is the same threads or new ones, and which code path creates
+ * them.
+ */
+
+tracepoint:sched:sched_process_fork
+/ args->parent_pid == $1 /
+{
+    @fork_cnt[args->parent_comm] = count();
+    @born_at[args->child_pid] = nsecs;
+}
+
+tracepoint:sched:sched_process_exit
+/ pid == $1 /
+{
+    @exit_cnt[comm] = count();
+    if (@born_at[tid]) {
+        @thread_lifetime_ms = hist((nsecs - @born_at[tid]) / 1000000);
+        delete(@born_at[tid]);
+    }
+}
+
+interval:s:$2
+{
+    exit();
+}
+
+END
+{
+    clear(@born_at);
+}

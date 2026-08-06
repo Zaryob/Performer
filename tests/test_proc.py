@@ -91,10 +91,24 @@ class CpuTests(unittest.TestCase):
         self.assertEqual(proc.overhead_pct(50.0, None), 0.0)
         self.assertEqual(proc.overhead_pct(0.0, 50.0), 0.0)
 
-    def test_mean_cpu_pct_ignores_missing_samples(self):
-        self.assertEqual(proc.mean_cpu_pct([{"cpu_pct": 10.0}, None]), 10.0)
-        self.assertEqual(proc.mean_cpu_pct([{"cpu_pct": 10.0}, {"cpu_pct": 20.0}]), 15.0)
-        self.assertIsNone(proc.mean_cpu_pct([None, {}]))
+    def test_baseline_ignores_missing_samples(self):
+        self.assertEqual(proc.baseline_cpu_pct([{"cpu_pct": 10.0}, None]), 10.0)
+        self.assertIsNone(proc.baseline_cpu_pct([None, {}]))
+
+    def test_baseline_takes_the_higher_untraced_sample(self):
+        """A disturbed baseline reads low, and would inflate the estimate."""
+        self.assertEqual(
+            proc.baseline_cpu_pct([{"cpu_pct": 140.0}, {"cpu_pct": 61.0}]), 140.0
+        )
+
+    def test_baseline_disagreement_is_measurable(self):
+        self.assertIsNone(proc.baseline_disagreement([{"cpu_pct": 10.0}]))
+        self.assertAlmostEqual(
+            proc.baseline_disagreement([{"cpu_pct": 140.0}, {"cpu_pct": 70.0}]), 0.5
+        )
+        self.assertAlmostEqual(
+            proc.baseline_disagreement([{"cpu_pct": 100.0}, {"cpu_pct": 100.0}]), 0.0
+        )
 
 
 class PidRecyclingTests(unittest.TestCase):

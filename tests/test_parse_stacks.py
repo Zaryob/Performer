@@ -156,8 +156,15 @@ class EdgeCaseTests(unittest.TestCase):
         self.assertEqual(folded, [("w;g;f", 4)])
         self.assertTrue(any("found '@samples'" in w for w in warnings), warnings)
 
-    def test_non_integer_value_is_reported(self):
+    def test_stats_values_are_left_to_the_histogram_parser(self):
+        """One probe prints both shapes; neither parser may warn about the other."""
         text = "@cpu[\n    f+1\n, \n    g+2\n, w]: count 4, average 2\n"
+        result = parse_maps(text)
+        self.assertEqual(result.entries("cpu"), [])
+        self.assertEqual(result.warnings, [])
+
+    def test_a_genuinely_unparseable_value_is_still_reported(self):
+        text = "@cpu[\n    f+1\n, \n    g+2\n, w]: not-a-number\n"
         result = parse_maps(text)
         self.assertEqual(result.entries("cpu"), [])
         self.assertTrue(any("not a plain count" in w for w in result.warnings))

@@ -1,0 +1,43 @@
+/*
+ * syscall_lat.bt -- time spent in each system call.
+ *
+ *   $1  target pid (tgid)
+ *   $2  watchdog seconds
+ *
+ * raw_syscalls fires on every single call, which on a 315 thread process is a
+ * very large number of events; this probe belongs to the `deep` tier and to
+ * short runs only.
+ *
+ * The syscall number is recorded, not the name: bpftrace would have to carry
+ * a string per event to give names, and numbers are two orders of magnitude
+ * cheaper. The mapping to names happens in post-processing, where it costs
+ * nothing.
+ */
+
+tracepoint:raw_syscalls:sys_enter
+/ pid == $1 /
+{
+    @sc_start[tid] = nsecs;
+    @sc_id[tid] = args->id;
+}
+
+tracepoint:raw_syscalls:sys_exit
+/ @sc_start[tid] /
+{
+    $elapsed_us = (nsecs - @sc_start[tid]) / 1000;
+    @sc_total_us[@sc_id[tid]] = sum($elapsed_us);
+    @sc_count[@sc_id[tid]]    = count();
+    delete(@sc_start[tid]);
+    delete(@sc_id[tid]);
+}
+
+interval:s:$2
+{
+    exit();
+}
+
+END
+{
+    clear(@sc_start);
+    clear(@sc_id);
+}

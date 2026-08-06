@@ -1,0 +1,45 @@
+/*
+ * timers.bt -- how hard the application leans on timers.
+ *
+ *   $1  target pid (tgid)
+ *   $2  watchdog seconds
+ *
+ * Counts timer arming and waiting per call site. The number that matters is
+ * arms per second: an application that arms and disarms a timer around every
+ * operation pays for it twice, once in the syscall and once in whatever lock
+ * the timer structure sits behind.
+ *
+ * The rate is not computed here -- bpftrace would need a second timer to do
+ * it -- but in post-processing, which divides by the measured duration and so
+ * gets the rate right even when the run was cut short.
+ */
+
+tracepoint:syscalls:sys_enter_clock_nanosleep
+/ pid == $1 /
+{
+    @timer_calls[probe] = count();
+}
+
+tracepoint:syscalls:sys_enter_timerfd_settime
+/ pid == $1 /
+{
+    @timer_calls[probe] = count();
+    @timer_arm_stack[ustack] = count();
+}
+
+tracepoint:syscalls:sys_enter_epoll_wait
+/ pid == $1 /
+{
+    @timer_calls[probe] = count();
+}
+
+tracepoint:syscalls:sys_enter_nanosleep
+/ pid == $1 /
+{
+    @timer_calls[probe] = count();
+}
+
+interval:s:$2
+{
+    exit();
+}

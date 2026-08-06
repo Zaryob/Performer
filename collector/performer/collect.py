@@ -22,17 +22,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from . import layout, manifest as manifest_mod, preflight as preflight_mod, proc, profiles
+from . import emit, layout, manifest as manifest_mod, preflight as preflight_mod
+from . import proc, profiles
 from . import __version__
 from .bundle import BundleBuilder
 from .errors import PerformerError, PreflightError
-from .parse import stacks
 from .profiles import Profile
 from .runner import (
+    ATTACH_GRACE_S,
     ProbeProcess,
     SeriesSampler,
     TargetWatcher,
     scan_stderr,
+    stop_all,
+    wait_for_attach_all,
     wait_for_run,
 )
 
@@ -59,6 +62,9 @@ class CollectOptions:
     #: is no CLI flag because a shorter trial measures stack quality worse.
     preflight_trial_s: float = preflight_mod.TRIAL_S
     preflight_attach_grace_s: Optional[float] = None
+    #: How long to watch the probes for an early exit before the run starts.
+    #: Shared across all of them, so it does not scale with the probe count.
+    attach_grace_s: Optional[float] = None
 
 
 @dataclass
@@ -108,13 +114,19 @@ def collect(options: CollectOptions, *, printer: Printer = print) -> CollectResu
 
     target_static = proc.target_info(options.pid)
     threads_start = proc.snapshot_threads(options.pid)
-    ticks_start = proc.cpu_ticks(options.pid)
 
     watcher = TargetWatcher(options.pid)
     sampler = SeriesSampler(options.pid)
     interrupted = threading.Event()
 
     launched = _launch_probes(builder, profile, report, options, printer)
+
+    # The CPU reading and the clock have to start at the same instant. Taking
+    # the reading before the probes attach would charge the attach time --
+    # seconds of it, growing with the number of probes -- to a window measured
+    # from after it, inflating the overhead estimate in proportion to how much
+    # was being measured.
+    ticks_start = proc.cpu_ticks(options.pid)
     run_started = time.monotonic()
     watcher.start()
     sampler.start()
@@ -127,15 +139,15 @@ def collect(options: CollectOptions, *, printer: Printer = print) -> CollectResu
             probes=[p for _spec, p in launched],
             interrupted=interrupted,
         )
+    # Closed together, for the same reason they were opened together.
     elapsed = time.monotonic() - run_started
+    ticks_end = proc.cpu_ticks(options.pid)
 
     # ---- stop everything --------------------------------------------
     printer(f"stopping probes after {elapsed:.1f}s ({outcome.reason})")
     sampler.stop()
     watcher.stop()
-    ticks_end = proc.cpu_ticks(options.pid)
-    for _spec, probe in launched:
-        probe.stop()
+    stop_all([probe for _spec, probe in launched])
 
     threads_end = proc.snapshot_threads(options.pid)
     ended_at = manifest_mod.utc_now()
@@ -147,7 +159,9 @@ def collect(options: CollectOptions, *, printer: Printer = print) -> CollectResu
     )
 
     # ---- turn probe output into bundle files -------------------------
-    probe_results = _finish_probes(builder, launched, report, profile, options, printer)
+    probe_results = _finish_probes(
+        builder, launched, report, profile, options, printer, elapsed
+    )
 
     thread_count_start = len(threads_start)
     thread_count_end = len(threads_end)
@@ -180,8 +194,10 @@ def collect(options: CollectOptions, *, printer: Printer = print) -> CollectResu
 
     # ---- quality ------------------------------------------------------
     during_pct = proc.cpu_pct_between(ticks_start, ticks_end, elapsed)
-    baseline_pct = proc.mean_cpu_pct([report.cpu_before, cpu_after])
-    quality = _build_quality(report, probe_results, options, baseline_pct, during_pct)
+    baseline_pct = proc.baseline_cpu_pct([report.cpu_before, cpu_after])
+    quality = _build_quality(
+        report, probe_results, options, baseline_pct, during_pct, cpu_after
+    )
 
     # With --until-exit the target exiting *is* the stop condition, so it is
     # a normal completion rather than a degradation. Recording it as a death
@@ -341,6 +357,9 @@ def _launch_probes(
     """Start every probe that passed its smoke test."""
     bpftrace = options.bpftrace or report.bpftrace_path or "bpftrace"
     watchdog = int((options.duration_s or 0) + 30) if options.duration_s else 86400
+    # Every probe is started before any of them is waited on, so they all
+    # attach at effectively the same moment and the window the manifest
+    # records is the window they all covered.
     launched: List[tuple] = []
     for spec in profile.probes:
         if not report.smoke.get(spec.name):
@@ -357,12 +376,19 @@ def _launch_probes(
             env=preflight_mod.bpftrace_env(),
         )
         probe.start()
-        if probe.started and probe.wait_for_attach():
+        launched.append((spec, probe))
+
+    surviving = wait_for_attach_all(
+        [probe for _spec, probe in launched],
+        options.attach_grace_s or ATTACH_GRACE_S,
+    )
+    for spec, probe in launched:
+        if surviving.get(spec.name):
             printer(f"  probe '{spec.name}' attached (pid {probe.pid})")
-            launched.append((spec, probe))
         else:
-            printer(f"  probe '{spec.name}' failed to start; see raw/{spec.name}.stderr.log")
-            launched.append((spec, probe))
+            printer(
+                f"  probe '{spec.name}' failed to start; see raw/{spec.name}.stderr.log"
+            )
     return launched
 
 
@@ -373,10 +399,16 @@ def _finish_probes(
     profile: Profile,
     options: CollectOptions,
     printer: Printer,
+    elapsed_s: float,
 ) -> List[manifest_mod.ProbeResult]:
     """Parse each probe's output into the bundle and judge how it went."""
     results: List[manifest_mod.ProbeResult] = []
     launched_by_name = {spec.name: (spec, probe) for spec, probe in launched}
+    context = emit.EmitContext(
+        builder=builder,
+        duration_s=elapsed_s,
+        annotate_kernel=options.annotate_kernel,
+    )
 
     for spec in profile.probes:
         if spec.name not in launched_by_name:
@@ -401,26 +433,21 @@ def _finish_probes(
         status = "ok"
 
         stdout = probe.read_stdout()
-        if spec.name == "oncpu":
-            folded, fold_stats, parse_warnings = stacks.parse_oncpu(
-                stdout, annotate_kernel=options.annotate_kernel
-            )
-            warnings.extend(parse_warnings)
-            if folded:
-                builder.add_folded(layout.STACK_ONCPU, folded)
-                outputs.append(layout.STACK_ONCPU)
-                printer(
-                    f"  {layout.STACK_ONCPU}: {len(folded)} stacks, "
-                    f"{fold_stats.total_samples} samples, "
-                    f"{fold_stats.unknown_ratio:.1%} unknown frames"
-                )
-                report.unknown_frame_ratio = round(fold_stats.unknown_ratio, 4)
-                report.unknown_frame_samples = fold_stats.unknown_frames
-                report.total_frame_samples = fold_stats.total_frames
-            else:
-                warnings.append("produced no stacks")
-        elif stdout.strip():  # pragma: no cover - M2 probes
-            warnings.append(f"no parser for probe '{spec.name}' yet; output discarded")
+        emitted = emit.emit(spec.name, context, stdout)
+        warnings.extend(emitted.warnings)
+        outputs.extend(emitted.outputs)
+        for note in emitted.notes:
+            printer(f"  {note}")
+
+        # The on-CPU profile is the sample the quality block is computed
+        # from, and the real run is a far better estimate of symbolisation
+        # quality than the two second preflight trial.
+        if emitted.fold_stats is not None and spec.name == "oncpu":
+            stats = emitted.fold_stats
+            if stats.total_frames:
+                report.unknown_frame_ratio = round(stats.unknown_ratio, 4)
+                report.unknown_frame_samples = stats.unknown_frames
+                report.total_frame_samples = stats.total_frames
 
         if info.reason in ("sigkill", "startup_error", "not_started"):
             status = "failed"
@@ -464,12 +491,20 @@ def _build_quality(
     options: CollectOptions,
     baseline_pct: Optional[float],
     during_pct: Optional[float],
+    cpu_after: Optional[Dict[str, Any]] = None,
 ) -> manifest_mod.Quality:
     notes: List[str] = []
     if options.ignore_quality:
         notes.append("frame pointer check overridden with --ignore-quality")
     if baseline_pct is None or during_pct is None:
         notes.append("overhead could not be estimated: CPU samples were unavailable")
+    disagreement = proc.baseline_disagreement([report.cpu_before, cpu_after])
+    if disagreement is not None and disagreement > 0.25:
+        notes.append(
+            f"the target's untraced CPU differed by {disagreement:.0%} between the "
+            "samples taken before and after the run; its own load was not steady, "
+            "so the overhead estimate is unreliable"
+        )
 
     overhead: Optional[Dict[str, float]] = None
     if baseline_pct is not None or during_pct is not None:
@@ -478,6 +513,8 @@ def _build_quality(
             overhead["cpu_pct_before"] = float(report.cpu_before["cpu_pct"])
         if during_pct is not None:
             overhead["cpu_pct_during"] = during_pct
+        if cpu_after and cpu_after.get("cpu_pct") is not None:
+            overhead["cpu_pct_after"] = float(cpu_after["cpu_pct"])
         overhead["sample_window_s"] = options.overhead_window_s
 
     total = report.total_frame_samples

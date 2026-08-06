@@ -42,11 +42,16 @@ run_20260806T142530Z_baseline/
 │   ├── offcpu.folded
 │   ├── futex.folded
 │   └── offwake.folded       optional
-├── hist/
-│   ├── runqlat.json
-│   ├── syscall_latency.json
-│   ├── futex_by_addr.json
-│   └── offcpu_duration.json
+├── hist/                    histograms and aggregation tables
+│   ├── runqlat.json         run queue latency, plus per-thread stats
+│   ├── offcpu_duration.json blocked interval distribution
+│   ├── offcpu_by_state.json blocked time split by task state
+│   ├── futex_by_addr.json   wait time per lock address  <- the hot lock
+│   ├── futex_duration.json  futex wait distribution
+│   ├── threadlife.json      threads created and destroyed, per second
+│   ├── thread_lifetime.json how long threads lived
+│   ├── timers.json          timer calls and their rate
+│   └── syscall_latency.json time per syscall
 ├── series/
 │   ├── threads.csv
 │   └── schedstat.csv
@@ -209,8 +214,9 @@ Two shapes, distinguished by `kind`.
 
 **`kind: "histogram"`** ([`hist.schema.json`](../schema/hist.schema.json)) — a
 `hist()`/`lhist()` map. Buckets are ordered and non-overlapping, `lo` inclusive
-and `hi` exclusive; the last bucket has `hi: null`. One file may carry several
-keyed `series`.
+and `hi` exclusive. An open edge is `null`: the top bucket has `hi: null`, and
+an `lhist` underflow bucket has `lo: null`. One file may carry several keyed
+`series`.
 
 ```json
 { "schema_version": 1, "kind": "histogram", "name": "runqlat", "unit": "us",
@@ -258,8 +264,8 @@ Directed edge list from `sched:sched_wakeup`
                "total_us": 88213.0 } ] }
 ```
 
-`total_us` is nullable — it needs runqlat correlation, which not every profile
-collects. Threads referenced only by an edge are legal; the viewer falls back to
+`total_us` is nullable — it needs runqlat correlation, which no profile
+collects yet, so today it is always null. Threads referenced only by an edge are legal; the viewer falls back to
 `meta/threads.json` and then to the bare tid. Edges may point at tids outside
 the target process (`nodes[].external: true`).
 
@@ -275,6 +281,15 @@ the target process (`nodes[].external: true`).
 * [`threads.schema.json`](../schema/threads.schema.json) — every tid with its
   name and its `schedstat` at both ends of the run. Read from `/proc`, so it
   survives total eBPF failure and still populates the Threads table.
+
+## Probe windows
+
+Every probe in a run covers the same window. They are all started before any
+of them is waited on, and all SIGINTed at the same instant, because otherwise
+the first probe would trace seconds that the last one missed while
+`duration_s` claimed a single window for all of them. `probes[].duration_s`
+records each probe's own lifetime, which includes its startup and its map
+dump and is therefore always a little longer than the run.
 
 ## Compatibility
 

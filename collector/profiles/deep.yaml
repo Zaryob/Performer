@@ -1,0 +1,41 @@
+# Hypothesis testing, on short runs only.
+#
+# raw_syscalls fires on every system call, which on a heavily threaded process
+# is the highest event rate in the whole tool. This tier will visibly slow the
+# target. Use it to confirm something the standard profile already pointed at,
+# not to go looking.
+name: deep
+description: "Everything in the standard profile plus per-syscall latency and timer activity. High overhead: measures a target that is no longer quite itself."
+expected_overhead: "20-60%"
+# The collector refuses a longer run without --force.
+max_duration_s: 60
+
+probes:
+  - name: oncpu
+    program: oncpu.bt
+    required: true
+
+  - name: runqlat
+    program: runqlat.bt
+
+  - name: threadlife
+    program: threadlife.bt
+
+  - name: offcpu
+    program: offcpu.bt
+    thresholds:
+      min_us: 100
+
+  - name: futex
+    program: futex.bt
+    thresholds:
+      min_us: 50
+
+  - name: wakeup
+    program: wakeup.bt
+
+  - name: syscall_lat
+    program: syscall_lat.bt
+
+  - name: timers
+    program: timers.bt

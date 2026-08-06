@@ -47,7 +47,12 @@ STACK_OFFWAKE = f"{DIR_STACKS}/offwake.folded"
 HIST_RUNQLAT = f"{DIR_HIST}/runqlat.json"
 HIST_SYSCALL_LATENCY = f"{DIR_HIST}/syscall_latency.json"
 HIST_FUTEX_BY_ADDR = f"{DIR_HIST}/futex_by_addr.json"
+HIST_FUTEX_DURATION = f"{DIR_HIST}/futex_duration.json"
 HIST_OFFCPU_DURATION = f"{DIR_HIST}/offcpu_duration.json"
+HIST_OFFCPU_BY_STATE = f"{DIR_HIST}/offcpu_by_state.json"
+HIST_THREADLIFE = f"{DIR_HIST}/threadlife.json"
+HIST_THREAD_LIFETIME = f"{DIR_HIST}/thread_lifetime.json"
+HIST_TIMERS = f"{DIR_HIST}/timers.json"
 
 # series/ -- 1 Hz sampled time series
 SERIES_THREADS = f"{DIR_SERIES}/threads.csv"
@@ -79,6 +84,11 @@ SCHEMA_FOR_KIND: Dict[str, str] = {
     "histogram": "hist.schema.json",
     "table": "table.schema.json",
 }
+
+#: A 315 thread process can produce tens of thousands of wakeup edges; past a
+#: few thousand the graph is unreadable anyway, and the count of what was
+#: dropped is recorded in the document.
+MAX_WAKEUP_EDGES = 5000
 
 RUN_ID_RE = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[A-Za-z0-9._-]{1,64}$")
 LABEL_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")

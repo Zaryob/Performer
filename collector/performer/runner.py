@@ -66,6 +66,7 @@ class ProbeProcess:
     _stderr: Optional[object] = field(default=None, init=False, repr=False)
     _started_at: float = field(default=0.0, init=False, repr=False)
     _exit: Optional[ExitInfo] = field(default=None, init=False, repr=False)
+    _sigint_sent: bool = field(default=False, init=False, repr=False)
 
     # -- lifecycle ------------------------------------------------------
 
@@ -108,31 +109,33 @@ class ProbeProcess:
     def pid(self) -> Optional[int]:
         return self._proc.pid if self._proc is not None else None
 
-    def wait_for_attach(self, grace_s: float = ATTACH_GRACE_S, *, sleep=time.sleep) -> bool:
-        """Return False when the probe died during startup.
+    def check_startup(self) -> bool:
+        """True while the probe is still alive; records the failure if not.
 
-        A bpftrace that cannot attach exits within milliseconds, so this
-        catches a mistyped tracepoint or a missing kernel feature before the
-        run wastes a minute producing nothing.
+        A bpftrace that cannot attach exits within milliseconds, so polling
+        this catches a mistyped tracepoint or a missing kernel feature before
+        the run wastes a minute producing nothing.
         """
         if self._proc is None:
             return False
-        deadline = time.monotonic() + grace_s
-        while time.monotonic() < deadline:
-            if self._proc.poll() is not None:
-                self._exit = ExitInfo(
-                    "startup_error",
-                    self._proc.returncode,
-                    time.monotonic() - self._started_at,
-                )
-                self._close_files()
-                self.warnings.append(
-                    f"exited during startup with code {self._proc.returncode}; "
-                    f"see {self.stderr_path.name}"
-                )
-                return False
-            sleep(0.05)
-        return True
+        if self._proc.poll() is None:
+            return True
+        if self._exit is None:
+            self._exit = ExitInfo(
+                "startup_error",
+                self._proc.returncode,
+                time.monotonic() - self._started_at,
+            )
+            self._close_files()
+            self.warnings.append(
+                f"exited during startup with code {self._proc.returncode}; "
+                f"see {self.stderr_path.name}"
+            )
+        return False
+
+    def wait_for_attach(self, grace_s: float = ATTACH_GRACE_S, *, sleep=time.sleep) -> bool:
+        """Watch this probe alone through its grace window."""
+        return wait_for_attach_all([self], grace_s, sleep=sleep).get(self.name, False)
 
     # -- stopping -------------------------------------------------------
 
@@ -161,6 +164,16 @@ class ProbeProcess:
         except subprocess.TimeoutExpired:
             return False
 
+    def signal_stop(self) -> None:
+        """Send the SIGINT without waiting for the maps to be written.
+
+        Separate from :meth:`stop` so a set of probes can be ended at the same
+        instant and then waited on individually.
+        """
+        if self._exit is None and self._proc is not None and self._proc.poll() is None:
+            self._signal_group(signal.SIGINT)
+            self._sigint_sent = True
+
     def stop(
         self,
         *,
@@ -174,11 +187,12 @@ class ProbeProcess:
             self._exit = ExitInfo("not_started", None, 0.0)
             return self._exit
 
-        if self._proc.poll() is not None:
+        if self._proc.poll() is not None and not self._sigint_sent:
             # Exited on its own -- the in-probe watchdog, or a crash.
             reason = "exited"
         else:
-            self._signal_group(signal.SIGINT)
+            if not self._sigint_sent:
+                self._signal_group(signal.SIGINT)
             if self._wait(sigint_timeout):
                 reason = "sigint"
             else:
@@ -230,6 +244,58 @@ class ProbeProcess:
             return self.stderr_path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             return ""
+
+
+# --------------------------------------------------------------------------
+# starting and stopping a set of probes together
+# --------------------------------------------------------------------------
+
+
+def wait_for_attach_all(
+    probes: Sequence[ProbeProcess],
+    grace_s: float = ATTACH_GRACE_S,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+) -> Dict[str, bool]:
+    """Watch every probe through one shared grace window.
+
+    Shared, not one window each: giving each probe its own would delay the
+    start of the measurement by the grace period times the number of probes,
+    and -- worse -- stagger the moments they attach, so the first probe would
+    trace seconds that the last one missed while the manifest claimed a single
+    window for all of them.
+
+    Returns probe name -> whether it survived startup.
+    """
+    surviving = {probe.name: probe.started for probe in probes}
+    deadline = time.monotonic() + grace_s
+    while time.monotonic() < deadline:
+        for probe in probes:
+            if surviving.get(probe.name) and not probe.check_startup():
+                surviving[probe.name] = False
+        if not any(surviving.values()):
+            break
+        sleep(0.05)
+    return surviving
+
+
+def stop_all(
+    probes: Sequence[ProbeProcess],
+    *,
+    sigint_timeout: float = SIGINT_TIMEOUT_S,
+    sigterm_timeout: float = SIGTERM_TIMEOUT_S,
+) -> None:
+    """End every probe at the same instant, then wait for them one by one.
+
+    Stopping them strictly in sequence would leave the last probe tracing for
+    as long as the earlier ones take to write their maps -- which, with a large
+    stack map, is seconds. Every probe would then cover a different window
+    while the manifest recorded one duration for all of them.
+    """
+    for probe in probes:
+        probe.signal_stop()
+    for probe in probes:
+        probe.stop(sigint_timeout=sigint_timeout, sigterm_timeout=sigterm_timeout)
 
 
 # --------------------------------------------------------------------------

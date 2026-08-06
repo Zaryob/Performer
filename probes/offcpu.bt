@@ -1,0 +1,64 @@
+/*
+ * offcpu.bt -- where threads block, and for how long.
+ *
+ *   $1  target pid (tgid)
+ *   $2  watchdog seconds
+ *   $3  minimum blocked time to record, in microseconds
+ *
+ * Gregg's method: the stack is saved when a thread goes off-CPU and the
+ * interval is closed when it comes back. This is correct because a sleeping
+ * thread cannot change its own stack.
+ *
+ * TASK STATE IS RECORDED, NOT FILTERED. It is tempting to keep only
+ * uninterruptible sleep to cut the volume, but a futex wait is
+ * TASK_INTERRUPTIBLE -- filtering on state deletes exactly the lock
+ * contention this project exists to find. The state travels with the sample
+ * as a label and the viewer filters on it.
+ *
+ * The threshold exists because a 315 thread process produces enormous numbers
+ * of very short off-CPU intervals that say nothing and fill the map.
+ */
+
+tracepoint:sched:sched_switch
+{
+    // prev is leaving the CPU: remember when, and how it got here.
+    if (args->prev_pid != 0 && pid == $1) {
+        @off_start[args->prev_pid] = nsecs;
+        @off_ustack[args->prev_pid] = ustack;
+        @off_kstack[args->prev_pid] = kstack;
+        @off_state[args->prev_pid] = args->prev_state;
+    }
+
+    // next is coming back: close the interval opened above. This runs
+    // unconditionally because the switch that wakes a target thread is
+    // usually accounted to some other process.
+    if (@off_start[args->next_pid]) {
+        $blocked_us = (nsecs - @off_start[args->next_pid]) / 1000;
+        if ($blocked_us >= $3) {
+            @offcpu_us[@off_kstack[args->next_pid],
+                       @off_ustack[args->next_pid],
+                       args->next_comm] = sum($blocked_us);
+            @offcpu_hist = hist($blocked_us);
+            @offcpu_by_state[@off_state[args->next_pid]] = sum($blocked_us);
+        }
+        delete(@off_start[args->next_pid]);
+        delete(@off_ustack[args->next_pid]);
+        delete(@off_kstack[args->next_pid]);
+        delete(@off_state[args->next_pid]);
+    }
+}
+
+interval:s:$2
+{
+    exit();
+}
+
+END
+{
+    // Scratch maps would otherwise be printed alongside the results and
+    // parsed as data.
+    clear(@off_start);
+    clear(@off_ustack);
+    clear(@off_kstack);
+    clear(@off_state);
+}

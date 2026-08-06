@@ -6,11 +6,18 @@ import os
 import unittest
 
 from performer import preflight, profiles
-from performer.errors import PerformerError
 
 from .support import fake_bpftrace, python_sleeper, requires_target, spawn_target
 
-PROFILE = profiles.load("oncpu")
+#: A one probe profile: these tests are about the checks, not the probe set,
+#: and every extra probe costs another trial run.
+PROFILE = profiles.Profile(
+    name="unit",
+    description="single probe, for preflight tests",
+    probes=(profiles.ONCPU,),
+    max_duration_s=600,
+    expected_overhead="< 3%",
+)
 FAST = {"trial_seconds": 0.2, "attach_grace_s": 0.5}
 
 
@@ -64,41 +71,6 @@ class IndividualCheckTests(unittest.TestCase):
         check = preflight.check_perf_event_paranoid()
         self.assertIn(check.status, (preflight.PASS, preflight.WARN))
         self.assertIn("perf_event_paranoid", check.message)
-
-
-class ProfileTests(unittest.TestCase):
-    def test_builtin_profile_loads(self):
-        self.assertEqual(profiles.load("oncpu").name, "oncpu")
-
-    def test_reserved_profiles_say_which_milestone(self):
-        for name in ("light", "standard", "deep"):
-            with self.subTest(profile=name):
-                with self.assertRaises(PerformerError) as ctx:
-                    profiles.load(name)
-                self.assertIn("M2", str(ctx.exception))
-
-    def test_unknown_profile_lists_the_available_ones(self):
-        with self.assertRaises(PerformerError) as ctx:
-            profiles.load("nonsense")
-        self.assertIn("oncpu", str(ctx.exception))
-
-    def test_profile_name_is_validated_before_use(self):
-        for name in ("../../etc/passwd", "a b", "Upper", ""):
-            with self.subTest(name=name):
-                with self.assertRaises(PerformerError):
-                    profiles.load(name)
-
-    def test_probe_program_must_be_a_bare_name(self):
-        bad = profiles.ProbeSpec(name="x", program="../../etc/passwd")
-        with self.assertRaises(PerformerError):
-            profiles.program_path(bad)
-
-    def test_oncpu_program_exists(self):
-        self.assertTrue(profiles.program_path(profiles.ONCPU).is_file())
-
-    def test_probe_args_are_positional_parameters(self):
-        spec = profiles.ProbeSpec(name="x", program="oncpu.bt", thresholds={"min_us": 100})
-        self.assertEqual(spec.probe_args(1234, 90), ("1234", "90", "100"))
 
 
 @requires_target

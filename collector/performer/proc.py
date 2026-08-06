@@ -334,9 +334,32 @@ def sample_cpu(pid: int, window_s: float, *, sleep=time.sleep) -> Optional[Dict[
     }
 
 
-def mean_cpu_pct(samples: Sequence[Optional[Dict[str, Any]]]) -> Optional[float]:
+def baseline_cpu_pct(samples: Sequence[Optional[Dict[str, Any]]]) -> Optional[float]:
+    """The target's untraced CPU, from the samples taken either side of a run.
+
+    The highest sample wins rather than the average. The two are meant to
+    measure the same thing -- the target with nothing attached -- so when they
+    disagree it is because one of them was disturbed, and a disturbed sample
+    reads *low*: something else had the CPU. Averaging a depressed baseline in
+    inflates the overhead estimate, and a quality flag that cries wolf is one
+    people learn to ignore. Taking the maximum makes the estimate conservative
+    instead, and both samples are recorded in the manifest either way.
+    """
     values = [s["cpu_pct"] for s in samples if s and s.get("cpu_pct") is not None]
-    return sum(values) / len(values) if values else None
+    return max(values) if values else None
+
+
+def baseline_disagreement(samples: Sequence[Optional[Dict[str, Any]]]) -> Optional[float]:
+    """How far apart the untraced samples were, as a fraction of the larger.
+
+    A large disagreement means the target's own load was not steady, which
+    makes any overhead estimate built on it unreliable -- worth saying out
+    loud rather than smoothing over.
+    """
+    values = [s["cpu_pct"] for s in samples if s and s.get("cpu_pct") is not None]
+    if len(values) < 2 or max(values) <= 0:
+        return None
+    return (max(values) - min(values)) / max(values)
 
 
 def overhead_pct(baseline_pct: Optional[float], during_pct: Optional[float]) -> float:

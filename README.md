@@ -30,17 +30,17 @@ lab box, so it uses **nothing outside the Python standard library** — no pip,
 no virtualenv, no network. The viewer is a static bundle that works from
 `file://`, so it needs no server and parses bundles entirely client-side.
 
-## Status: M1 complete
+## Status: M2 complete
 
-M0 fixed the contract — the bundle layout and the manifest schema. M1 makes it
-real: preflight, one probe (`oncpu.bt`), and an actual measurement of an actual
-process, end to end.
+M0 fixed the contract, M1 made one probe real, M2 completes the collector: the
+full probe set, three overhead tiers as YAML, and parsers for every shape
+bpftrace prints.
 
 | Milestone | Scope | State |
 |---|---|---|
 | **M0** | Repo skeleton, bundle format, `manifest.schema.json`, `inspect`/`validate`/`fake-run` | **done** |
 | **M1** | `preflight.py`, `collect` with `oncpu.bt`, folded stacks, real bundles | **done** |
-| M2 | Full probe set, YAML profiles, histogram parsers | todo |
+| **M2** | Full probe set, YAML profiles, histogram/table parsers, partial bundles | **done** |
 | M3 | Viewer: bundle loading, Overview, Flame, Threads | todo |
 | M4 | Diff screen, differential flame graph, normalisation | todo |
 | M5 | Locks table, wakeup graph, automatic verdict sentence | todo |
@@ -48,8 +48,28 @@ process, end to end.
 
 `diff` and `daemon` are registered as commands today and exit with code 3 and
 an explicit "not implemented in this milestone" message. They never pretend to
-have worked. The `light`/`standard`/`deep` profiles are refused by name until
-M2 defines them, rather than silently running something else.
+have worked.
+
+## Profiles
+
+Collection comes in three tiers, because tracing every context switch and every
+syscall of a 315-thread process perturbs it enough to invalidate the answer.
+
+| profile | probes | expected overhead | max duration |
+|---|---|---|---|
+| `light` | oncpu, runqlat, threadlife + `/proc` series | < 3% | 900 s |
+| `standard` (default) | + offcpu (100 µs), futex (50 µs), wakeup | 5–15% | 300 s |
+| `deep` | + syscall_lat, timers | 20–60% | 60 s |
+
+The time budget runs opposite to the overhead on purpose: the more a tier costs
+the target, the less of the target's life it may spend. Exceeding a tier's
+limit needs `--force`. Profiles are YAML in
+[`collector/profiles/`](collector/profiles/) and are meant to be edited on the
+target machine; see that directory's README for the format.
+
+Thresholds reach the manifest as well as the probe, because they change what
+the numbers mean: "no lock waited longer than 50 µs" and "no lock waits were
+recorded" are very different findings.
 
 ## Collecting
 
@@ -58,8 +78,8 @@ illustrative — the numbers come from a real run's shape, not a specific one):
 
 ```console
 $ ./collector/bin/performer collect --pid 205852 --duration 30 \
-      --label baseline --tag before-timer-fix --out ./runs
-preflight: pid 205852, profile 'oncpu'
+      --profile standard --label baseline --tag before-timer-fix --out ./runs
+preflight: pid 205852, profile 'standard'
 preflight
   [ok] privileges             sufficient privileges (root)
   [ok] bpftrace               bpftrace 0.20.2 at /usr/bin/bpftrace
@@ -68,13 +88,24 @@ preflight
   [ok] perf_event_paranoid    kernel.perf_event_paranoid = 2
   [ok] frame_pointers         stacks resolve (0.4% unknown frames over 2946 samples)
   [ok] smoke:oncpu            probe 'oncpu' attached and produced output
+  [ok] smoke:runqlat          probe 'runqlat' attached and produced output
+  ...
 run 20260806T045451Z-baseline
   probe 'oncpu' attached (pid 26957)
+  ...
 stopping probes after 30.0s (duration)
   stacks/oncpu.folded: 1841 stacks, 291043 samples, 0.4% unknown frames
+  stacks/offcpu.folded: 902 stacks, 61403118 us blocked, 0.4% unknown frames
+  hist/futex_by_addr.json: 214 lock addresses, hottest holds 71% of the wait time
+  graph/wakeup_edges.json: 8814 edges, busiest waker accounts for 44% of wakeups
 
 status:        ok
 ```
+
+Every probe starts before any of them is waited on, and they are all SIGINTed
+at the same instant, so the window the manifest records is the window they all
+actually covered — otherwise the first probe would trace seconds the last one
+missed.
 
 Preflight refuses to start a measurement that cannot produce a usable answer.
 Above 30% unresolved frames it stops and tells you to rebuild with
@@ -162,7 +193,7 @@ an error-level flag exit 1, which is what a future CI gate would use.
 
 | Command | Purpose |
 |---|---|
-| `collect --pid N --label L` | Measure a running process into a bundle. `--duration`/`--until-exit`, `--profile`, `--tag`, `--ignore-quality`, `--force`, `--overhead-window`, `--keep-raw-stdout`, `--annotate-kernel` |
+| `collect --pid N --label L` | Measure a running process into a bundle. `--profile light\|standard\|deep`, `--duration`/`--until-exit`, `--tag`, `--ignore-quality`, `--force`, `--overhead-window`, `--keep-raw-stdout`, `--annotate-kernel` |
 | `preflight --pid N` | Run the environment checks without collecting. `--skip-trials`, `--json` |
 | `inspect <bundle>...` | Manifest summary, quality flags, schema check. `--json`, `--strict`, `--verbose`, `--no-validate` |
 | `validate <bundle>...` | Schema + cross-field validation only, exit 1 on failure. `--verify-hashes` |
@@ -228,12 +259,16 @@ collector/
     preflight.py        the seven environment checks
     profiles.py         probe sets and overhead tiers
     runner.py           probe supervision, signals, watcher, 1 Hz sampler
+    yamlish.py          stdlib-only YAML subset reader (for profiles)
+    emit.py             probe output -> bundle files, one emitter per probe
     parse/stacks.py     bpftrace stack maps -> FlameGraph folded
+    parse/hist.py       hist()/lhist()/stats() and value maps
+    parse/syscalls.py   syscall number -> name
     collect.py          the measurement itself
     report.py           inspect rendering and quality thresholds
     fake.py, cli.py
-  profiles/             M2: light/standard/deep YAML definitions
-probes/oncpu.bt         on-CPU sampling; the rest arrive in M2
+  profiles/*.yaml       light / standard / deep overhead tiers
+probes/*.bt             the eight probe programs
 schema/                 JSON Schemas — the machine-readable contract
 viewer/                 M3: Vite + React + TypeScript, built to viewer/dist
 docs/bundle-format.md   the human-readable contract
@@ -248,12 +283,18 @@ $ make check         # builds the C++ target, then runs everything
 $ make test          # or: python3 -m unittest discover -s tests -t .
 ```
 
-193 tests, no test dependencies, about 80 seconds. What they actually exercise:
+281 tests, no test dependencies, under three minutes. What they actually
+exercise:
 
 * **Parsing** against captured bpftrace output from two release generations
   (`tests/fixtures/bpftrace/`), including the cases that break naive parsers:
   C++ symbols containing commas, `operator+`, hex offsets, module suffixes,
-  unresolved addresses, empty stacks and truncated output.
+  unresolved addresses, empty stacks and truncated output. One probe prints
+  stack maps, histograms and stats into a single stream, so each parser is
+  also checked for staying silent about the shapes that belong to the other.
+* **The YAML reader and the profiles**, including that every profile's probes
+  exist as `.bt` files and have an emitter — a probe nothing can parse would
+  be collected for nothing.
 * **The contract**: schema validator, manifest cross-field rules
   (`tests/fixtures/manifest/valid_*.json` and `invalid_*.json`, each of the
   latter carrying a `_why_invalid` note), bundle round-trips, hostile archives.

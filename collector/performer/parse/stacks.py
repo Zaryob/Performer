@@ -46,6 +46,9 @@ _ENTRY_START_RE = re.compile(r"^@([A-Za-z_][A-Za-z0-9_]*)?(\[|:)")
 
 _TERMINATOR_RE = re.compile(r"\]:\s*(.*)$")
 
+#: ``[2, 4)   8 |@@@|`` -- a histogram bucket, which belongs to parse/hist.py.
+_HIST_BUCKET_RE = re.compile(r"^\s*[\[(][^\])]*[\])]\s+\d+\s*\|?")
+
 
 class StackKey(Sequence[str]):
     """A stack key: frames in bpftrace order, leaf first."""
@@ -129,9 +132,17 @@ def parse_maps(text: str) -> ParseResult:
 
         name = match.group(1) or ""
         if match.group(2) == ":":
-            # Unkeyed scalar: "@name: 42"
-            _add_entry(result, name, (), line.split(":", 1)[1])
+            trailer = line.split(":", 1)[1].strip()
             index += 1
+            if not trailer:
+                # "@name:" with the value on following lines is a histogram.
+                # It belongs to parse/hist.py; skipping its bucket lines here
+                # keeps them out of the preamble.
+                while index < len(lines) and _HIST_BUCKET_RE.match(lines[index]):
+                    index += 1
+                continue
+            # Unkeyed scalar: "@name: 42"
+            _add_entry(result, name, (), trailer)
             continue
 
         block, index = _collect_entry(lines, index)
@@ -151,6 +162,8 @@ def parse_maps(text: str) -> ParseResult:
 def _add_entry(
     result: ParseResult, name: str, keys: Tuple[Key, ...], raw_value: str
 ) -> None:
+    if _STATS_VALUE_RE.match(raw_value.strip()):
+        return  # a stats() entry; parse/hist.py handles it
     value = _parse_value(raw_value)
     if value is None:
         result.warnings.append(
@@ -158,6 +171,12 @@ def _add_entry(
         )
         return
     result.maps.setdefault(name, []).append(MapEntry(keys=keys, value=value))
+
+
+#: ``count 5, average 3, total 15`` -- a stats() map, which belongs to
+#: parse/hist.py.  A single probe prints both shapes into one stream, so this
+#: parser has to recognise the other one and stay quiet about it.
+_STATS_VALUE_RE = re.compile(r"^(count|average|total|min|max|sum)\s+-?\d+")
 
 
 def _parse_value(raw: str) -> Optional[int]:

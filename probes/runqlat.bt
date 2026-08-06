@@ -1,0 +1,46 @@
+/*
+ * runqlat.bt -- how long runnable threads wait for a CPU.
+ *
+ *   $1  target pid (tgid)
+ *   $2  watchdog seconds
+ *
+ * This is the measurement that separates "the machine is saturated" from
+ * "the application is blocking on itself". High run queue latency with low
+ * CPU utilisation means something other than CPU is the constraint.
+ *
+ * The wakeup side cannot be filtered by pid: sched_wakeup fires in the
+ * context of the *waker*, which is frequently another process or a kernel
+ * thread. The filtering happens on the switch side, where the woken thread
+ * is the one running.
+ */
+
+tracepoint:sched:sched_wakeup,
+tracepoint:sched:sched_wakeup_new
+{
+    @queued_at[args->pid] = nsecs;
+}
+
+tracepoint:sched:sched_switch
+{
+    if (@queued_at[args->next_pid]) {
+        $wait_us = (nsecs - @queued_at[args->next_pid]) / 1000;
+        @runq_us = hist($wait_us);
+        @runq_by_thread[args->next_comm] = stats($wait_us);
+        delete(@queued_at[args->next_pid]);
+    }
+
+    // A thread preempted while still runnable goes straight back on the queue.
+    if (args->prev_state == 0) {
+        @queued_at[args->prev_pid] = nsecs;
+    }
+}
+
+interval:s:$2
+{
+    exit();
+}
+
+END
+{
+    clear(@queued_at);
+}

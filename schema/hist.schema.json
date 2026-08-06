@@ -39,7 +39,7 @@
           "type": "string"
         },
         "buckets": {
-          "description": "Ordered, non overlapping buckets. lo is inclusive, hi is exclusive; hi = null marks the open ended top bucket.",
+          "description": "Ordered, non overlapping buckets. lo is inclusive, hi is exclusive. lo = null marks an open ended bottom bucket (lhist underflow) and hi = null an open ended top bucket.",
           "type": "array",
           "items": { "$ref": "#/$defs/bucket" }
         },
@@ -62,7 +62,7 @@
       "additionalProperties": false,
       "required": ["lo", "hi", "count"],
       "properties": {
-        "lo": { "type": "number", "minimum": 0 },
+        "lo": { "type": ["number", "null"] },
         "hi": { "type": ["number", "null"] },
         "count": { "type": "integer", "minimum": 0 }
       }

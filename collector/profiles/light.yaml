@@ -1,0 +1,19 @@
+# First look: "is there a problem at all?"
+#
+# Everything here is either sampled or rare, so nothing scales with the
+# syscall rate. Safe to leave running on a production-like system.
+name: light
+description: "Sampled CPU profile, run queue latency and thread churn, plus the free /proc series. Answers where the time goes without perturbing the target."
+expected_overhead: "< 3%"
+max_duration_s: 900
+
+probes:
+  - name: oncpu
+    program: oncpu.bt
+    required: true
+
+  - name: runqlat
+    program: runqlat.bt
+
+  - name: threadlife
+    program: threadlife.bt

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import proc, profiles
+from . import parse
 from .parse import stacks
 from .profiles import Profile, ProbeSpec
 from .runner import ATTACH_GRACE_S, ProbeProcess
@@ -347,8 +348,8 @@ def run_trial(
     sleep(max(0.0, seconds))
     info = probe.stop(sigint_timeout=10.0, sigterm_timeout=3.0)
     stdout = probe.read_stdout()
-    parsed = stacks.parse_maps(stdout)
     folded, stats, warnings = stacks.parse_oncpu(stdout)
+    entries = parse.count_map_entries(stdout)
     result = TrialResult(
         ran=True,
         stdout=stdout,
@@ -357,7 +358,7 @@ def run_trial(
         folded=folded,
         stats=stats,
         warnings=warnings + list(probe.warnings),
-        map_entries=sum(len(entries) for entries in parsed.maps.values()),
+        map_entries=entries,
     )
     _cleanup(directory, temporary)
     return result

@@ -19,7 +19,14 @@ from performer.errors import PerformerError, PreflightError
 
 from .support import fake_bpftrace, requires_target, spawn_target
 
-FAST_PREFLIGHT = {"preflight_trial_s": 0.2, "preflight_attach_grace_s": 0.5}
+#: The fake bpftrace attaches instantly, so the trial and grace windows only
+#: need to be long enough to notice a process that died. Production defaults
+#: are seconds; these are the same code paths, just not waited out.
+FAST_PREFLIGHT = {
+    "preflight_trial_s": 0.15,
+    "preflight_attach_grace_s": 0.3,
+    "attach_grace_s": 0.3,
+}
 
 
 def quiet(_message: str) -> None:
@@ -254,11 +261,183 @@ class ArgumentTests(unittest.TestCase):
 
     def test_unknown_profile_is_refused_before_touching_the_target(self):
         options = CollectOptions(
-            pid=1, label="unit", out_dir=self.tmp, profile_name="standard"
+            pid=1, label="unit", out_dir=self.tmp, profile_name="nosuchprofile"
         )
         with self.assertRaises(PerformerError) as ctx:
             collect(options, printer=quiet)
-        self.assertIn("M2", str(ctx.exception))
+        self.assertIn("standard", str(ctx.exception))
+
+    def test_profile_name_cannot_escape_the_profiles_directory(self):
+        options = CollectOptions(
+            pid=1, label="unit", out_dir=self.tmp, profile_name="../../etc/passwd"
+        )
+        with self.assertRaises(PerformerError):
+            collect(options, printer=quiet)
+
+
+@requires_target
+class StandardProfileTests(unittest.TestCase):
+    """M2's acceptance criteria, on the full probe set."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    def _options(self, pid: int, **overrides) -> CollectOptions:
+        kwargs = dict(
+            pid=pid,
+            label="unit",
+            out_dir=self.tmp,
+            profile_name="standard",
+            duration_s=2.0,
+            overhead_window_s=0.0,
+            **FAST_PREFLIGHT,
+        )
+        kwargs.update(overrides)
+        return CollectOptions(**kwargs)
+
+    def test_every_probe_in_the_profile_delivers(self):
+        with spawn_target(threads=32, seconds=90) as target, fake_bpftrace("normal"):
+            result = collect(self._options(target.pid), printer=quiet)
+
+        statuses = {p["name"]: p["status"] for p in result.manifest["probes"]}
+        self.assertEqual(
+            statuses,
+            {
+                "oncpu": "ok",
+                "runqlat": "ok",
+                "threadlife": "ok",
+                "offcpu": "ok",
+                "futex": "ok",
+                "wakeup": "ok",
+            },
+        )
+        self.assertEqual(result.manifest["status"], "ok")
+
+    def test_the_bundle_holds_every_expected_artifact(self):
+        with spawn_target(threads=32, seconds=90) as target, fake_bpftrace("normal"):
+            result = collect(self._options(target.pid), printer=quiet)
+        expected = {
+            layout.STACK_ONCPU,
+            layout.STACK_OFFCPU,
+            layout.STACK_FUTEX,
+            layout.HIST_RUNQLAT,
+            layout.HIST_OFFCPU_DURATION,
+            layout.HIST_OFFCPU_BY_STATE,
+            layout.HIST_FUTEX_BY_ADDR,
+            layout.HIST_FUTEX_DURATION,
+            layout.HIST_THREADLIFE,
+            layout.HIST_THREAD_LIFETIME,
+            layout.GRAPH_WAKEUP_EDGES,
+            layout.META_SYSTEM,
+            layout.META_TARGET,
+            layout.META_THREADS,
+            layout.SERIES_THREADS,
+            layout.SERIES_SCHEDSTAT,
+        }
+        with Bundle.open(result.archive) as bundle:
+            present = set(bundle.paths())
+            self.assertTrue(expected <= present, sorted(expected - present))
+            self.assertTrue(bundle.validate(verify_hashes=True).ok)
+
+    def test_thresholds_are_recorded_because_they_change_the_meaning(self):
+        with spawn_target(threads=8, seconds=90) as target, fake_bpftrace("normal"):
+            result = collect(self._options(target.pid), printer=quiet)
+        probes = {p["name"]: p for p in result.manifest["probes"]}
+        self.assertEqual(probes["offcpu"]["thresholds"], {"min_us": 100.0})
+        self.assertEqual(probes["futex"]["thresholds"], {"min_us": 50.0})
+        self.assertNotIn("thresholds", probes["oncpu"])
+
+    def test_overhead_stays_under_the_profile_budget(self):
+        """M2 acceptance: the standard profile costs the target under 15%.
+
+        With no real eBPF in this environment this measures the collector's
+        own cost -- probe supervision plus 1 Hz /proc sampling of every thread
+        -- which is the part this project controls.
+        """
+        with spawn_target(threads=315, seconds=120) as target, fake_bpftrace("normal"):
+            result = collect(
+                self._options(target.pid, duration_s=8.0, overhead_window_s=3.0),
+                printer=quiet,
+            )
+        overhead = result.manifest["quality"]["estimated_overhead_pct"]
+        self.assertLess(overhead, 15.0, f"estimated overhead {overhead}%")
+
+    def test_overhead_is_not_inflated_by_probe_startup(self):
+        """The CPU window and the clock must open at the same instant.
+
+        Reading the counter before the probes attach would charge the attach
+        time to a window measured from after it, and the error would grow with
+        the number of probes -- exaggerating exactly the runs that trace most.
+        """
+        with spawn_target(threads=16, seconds=90) as target, fake_bpftrace("normal"):
+            one = collect(
+                CollectOptions(
+                    pid=target.pid, label="one", out_dir=self.tmp,
+                    profile_name="light", duration_s=3.0, overhead_window_s=1.0,
+                    **FAST_PREFLIGHT,
+                ),
+                printer=quiet,
+            )
+            many = collect(
+                self._options(target.pid, label="many", duration_s=3.0,
+                              overhead_window_s=1.0),
+                printer=quiet,
+            )
+        light_probes = len(one.manifest["probes"])
+        standard_probes = len(many.manifest["probes"])
+        self.assertGreater(standard_probes, light_probes)
+        for result in (one, many):
+            overhead = result.manifest["quality"]["estimated_overhead_pct"]
+            self.assertLess(overhead, 25.0, f"{result.manifest['label']}: {overhead}%")
+
+    def test_target_killed_mid_run_leaves_a_partial_but_readable_bundle(self):
+        """M2 acceptance: the awkward case a real lab produces."""
+        import threading
+        import time
+
+        def kill_once_every_probe_is_running():
+            # wakeup is the last probe the standard profile launches; once it
+            # has printed its attach line every probe is up and the run is
+            # genuinely underway.
+            marker = "raw/wakeup.stdout.log"
+            while True:
+                found = list(self.tmp.glob(f"run_*/{marker}"))
+                if found and found[0].stat().st_size > 0:
+                    break
+                time.sleep(0.02)
+            time.sleep(0.5)
+            target.process.kill()
+
+        with spawn_target(threads=32, seconds=120) as target, fake_bpftrace("normal"):
+            threading.Thread(
+                target=kill_once_every_probe_is_running, daemon=True
+            ).start()
+            result = collect(
+                self._options(target.pid, duration_s=30.0), printer=quiet
+            )
+
+        self.assertEqual(result.manifest["status"], "partial")
+        self.assertIsNotNone(result.manifest["target_died_at"])
+        self.assertLess(result.manifest["actual_duration_s"], 30.0)
+        with Bundle.open(result.archive) as bundle:
+            report = bundle.validate(verify_hashes=True)
+            self.assertTrue(report.ok, report.flat())
+            # Everything collected before the target died is still there.
+            self.assertTrue(bundle.exists(layout.STACK_OFFCPU))
+            self.assertTrue(bundle.exists(layout.HIST_FUTEX_BY_ADDR))
+            self.assertTrue(bundle.exists(layout.GRAPH_WAKEUP_EDGES))
+
+    def test_deep_profile_refuses_a_long_run_without_force(self):
+        options = CollectOptions(
+            pid=1, label="unit", out_dir=self.tmp,
+            profile_name="deep", duration_s=120.0,
+        )
+        with self.assertRaises(PerformerError) as ctx:
+            collect(options, printer=quiet)
+        self.assertIn("--force", str(ctx.exception))
+        self.assertIn("60", str(ctx.exception))
 
 
 @requires_target

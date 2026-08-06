@@ -7,6 +7,8 @@ ones that are awkward to get right:
   * it prints ``Attaching N probes...`` and then **nothing** until it is
     stopped -- the single write moment that makes SIGINT handling critical;
   * on SIGINT it dumps its maps to stdout and exits 0;
+  * the maps it dumps match the probe it was asked to run, in the shapes real
+    bpftrace uses: stack maps, histograms, stats and plain value maps;
   * it accepts the same positional parameters as a ``.bt`` program;
   * ``--version`` answers like bpftrace does.
 
@@ -32,7 +34,7 @@ import time
 
 VERSION = os.environ.get("FAKE_BPFTRACE_VERSION", "0.20.2")
 
-MAP_OUTPUT = """@cpu[
+ONCPU = """@cpu[
     __schedule+723
     schedule+70
     futex_wait_queue_me+164
@@ -70,6 +72,120 @@ EMPTY_STACK_OUTPUT = """@cpu[
 , worker]: 100
 """
 
+OFFCPU = """@offcpu_us[
+    __schedule+723
+    schedule+70
+    futex_wait_queue_me+164
+,
+    __lll_lock_wait+40
+    pthread_mutex_lock+274
+    TimerWheel::arm(unsigned long, std::function<void ()>)+188
+    WorkerThread::run()+1080
+    start_thread+219
+, {comm}]: 4820103
+@offcpu_us[
+    __schedule+723
+    schedule+70
+,
+    pthread_cond_wait+512
+    EventQueue::pop()+44
+    WorkerThread::run()+1080
+, worker]: 1260044
+@offcpu_by_state[1]: 6041210
+@offcpu_by_state[2]: 38900
+@offcpu_hist:
+[64, 128)             12 |@@                                                  |
+[128, 256)           190 |@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@                      |
+[256, 512)           318 |@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  |
+[1K, 2K)              44 |@@@@@@@                                             |
+[1M, ...)              2 |                                                    |
+"""
+
+RUNQLAT = """@runq_us:
+[0]                   93 |@@@@@                                               |
+[1]                  842 |@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  |
+[2, 4)               611 |@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@                 |
+[4, 8)               204 |@@@@@@@@@@@@                                        |
+[64, 128)             18 |@                                                   |
+@runq_by_thread[{comm}]: count 421, average 3, total 1263
+@runq_by_thread[worker]: count 1347, average 2, total 2694
+"""
+
+FUTEX = """@futex_us[
+    __lll_lock_wait+40
+    pthread_mutex_lock+274
+    TimerWheel::arm(unsigned long, std::function<void ()>)+188
+    WorkerThread::run()+1080
+, {comm}]: 4760000
+@futex_us[
+    pthread_cond_wait+512
+    EventQueue::pop()+44
+    WorkerThread::run()+1080
+, worker]: 1180000
+@futex_by_addr[139904315130432]: 6820000
+@futex_by_addr[139904315131208]: 118400
+@futex_by_addr[139904315133456]: 9200
+@futex_cnt_by_addr[139904315130432]: 41920
+@futex_cnt_by_addr[139904315131208]: 2140
+@futex_cnt_by_addr[139904315133456]: 310
+@futex_hist:
+[32, 64)             410 |@@@@@@@@@@@                                         |
+[64, 128)           1820 |@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  |
+[128, 256)           904 |@@@@@@@@@@@@@@@@@@@@@@@@                            |
+[8K, 16K)             12 |                                                    |
+"""
+
+WAKEUP = """@wake_cnt[4101, 4102]: 5200
+@wake_cnt[4101, 4103]: 4870
+@wake_cnt[4101, 4104]: 4610
+@wake_cnt[4102, 4101]: 210
+@wake_cnt[4103, 4101]: 190
+@wake_from_comm[{comm}]: 14680
+@wake_to_comm[worker]: 14290
+"""
+
+SYSCALL_LAT = """@sc_total_us[202]: 7912400
+@sc_total_us[232]: 3204100
+@sc_total_us[230]: 2410800
+@sc_total_us[0]: 184300
+@sc_total_us[9999]: 120
+@sc_count[202]: 128400
+@sc_count[232]: 18900
+@sc_count[230]: 61200
+@sc_count[0]: 44100
+@sc_count[9999]: 4
+"""
+
+THREADLIFE = """@fork_cnt[{comm}]: 42
+@exit_cnt[worker]: 39
+@thread_lifetime_ms:
+[256, 512)            18 |@@@@@@@@@@@@@@@@@@@@@@@@@                           |
+[512, 1K)             36 |@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  |
+[1K, 2K)               3 |@@@@                                                |
+"""
+
+TIMERS = """@timer_calls[tracepoint:syscalls:sys_enter_clock_nanosleep]: 61200
+@timer_calls[tracepoint:syscalls:sys_enter_timerfd_settime]: 121400
+@timer_calls[tracepoint:syscalls:sys_enter_epoll_wait]: 18900
+@timer_arm_stack[
+    timerfd_settime+12
+    TimerWheel::arm(unsigned long, std::function<void ()>)+188
+    WorkerThread::run()+1080
+]: 121400
+"""
+
+#: Probe program name -> the maps that probe prints.
+OUTPUT_BY_PROBE = {
+    "oncpu.bt": ONCPU,
+    "offcpu.bt": OFFCPU,
+    "runqlat.bt": RUNQLAT,
+    "futex.bt": FUTEX,
+    "wakeup.bt": WAKEUP,
+    "syscall_lat.bt": SYSCALL_LAT,
+    "threadlife.bt": THREADLIFE,
+    "timers.bt": TIMERS,
+}
+
 _stop = False
 
 
@@ -92,6 +208,7 @@ def main(argv: list) -> int:
         return 1
 
     positional = [a for a in argv[1:] if not a.startswith("-")]
+    program = os.path.basename(positional[0]) if positional else ""
     watchdog = 3600.0
     if len(positional) >= 3:
         try:
@@ -118,9 +235,12 @@ def main(argv: list) -> int:
 
     print()
     if mode == "empty_stacks":
-        sys.stdout.write(EMPTY_STACK_OUTPUT)
+        body = EMPTY_STACK_OUTPUT
     else:
-        sys.stdout.write(MAP_OUTPUT.format(comm=comm))
+        # An unknown program still gets the on-CPU shape, so a test that
+        # invents a probe name is not silently given nothing.
+        body = OUTPUT_BY_PROBE.get(program, ONCPU)
+    sys.stdout.write(body.format(comm=comm))
     sys.stdout.flush()
     return 0
 
