@@ -47,9 +47,15 @@ another screen. The thresholds live in `src/quality.ts` and mirror
 | Runs | loaded bundles, quality flags, select one |
 | Overview | run summary, probe table, quality block, artifacts |
 | Flame | on-CPU / off-CPU / futex, search, zoom, icicle, thread filter, hide idle |
-| Threads | every thread with CPU and runqueue time, sortable |
-| Diff | M4 |
+| Threads | every thread with CPU and runqueue time, sortable; delta columns against a baseline run |
+| Diff | two runs joined on their call paths: differential flame graph, biggest movers, the paths that appeared and the paths that vanished |
 | Locks, Wakeups, Timeline | M5 |
+
+The Diff screen expresses both runs as a share of their own total by default.
+Two measurements are almost never the same length, and comparing their raw
+counts is the standard way to read a diff backwards — everything in the longer
+run "grew". Frames are normalised (offsets and module suffixes stripped)
+before the join, so a rebuilt binary does not read as a rewrite.
 
 ## Layout
 
@@ -59,9 +65,10 @@ src/
   bundle/untar.ts     ustar + PAX reader, defensive
   bundle/load.ts      File -> Bundle, and the accessors
   bundle/folded.ts    folded stacks -> flame tree, filters, search
+  bundle/diff.ts      two runs -> per-path deltas, differential tree, colour
   quality.ts          the thresholds, mirroring the collector
   components/         FlameGraph (canvas), shared UI
-  screens/            Runs, Overview, Flame, Threads
+  screens/            Runs, Overview, Flame, Threads, Diff
 verify.mjs            drives a real browser over file:// and times the render
 ```
 

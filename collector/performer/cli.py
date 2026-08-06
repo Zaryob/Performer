@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from . import __version__, layout, profiles
+from . import diff as diff_mod
 from .bundle import Bundle
 from .errors import PerformerError
 from .report import LEVEL_ERROR, build_summary, render, summary_json
@@ -25,7 +26,6 @@ EXIT_FAILURE = 1
 EXIT_NOT_IMPLEMENTED = 3
 
 _NOT_IMPLEMENTED = {
-    "diff": "M4 -- run comparison is not implemented yet",
     "daemon": "M6 -- the localhost API is not implemented yet",
 }
 
@@ -176,6 +176,24 @@ def _build_parser() -> argparse.ArgumentParser:
     fake.add_argument("--pid", type=int, default=205852)
     fake.add_argument("--profile", default="standard")
     fake.add_argument("--seed", type=int, default=20260806)
+    # Imported here rather than at the top so that `performer --version` and
+    # the error paths do not pay for the generator.
+    from .fake import DEFAULT_LOAD, LOAD_SCENARIOS
+
+    fake.add_argument(
+        "--load",
+        default=DEFAULT_LOAD,
+        choices=sorted(LOAD_SCENARIOS),
+        help=(
+            "load scenario, so two bundles differ the way two measurements of "
+            "the same process under different load do ("
+            + "; ".join(
+                f"{name}: {scenario.description}"
+                for name, scenario in sorted(LOAD_SCENARIOS.items())
+            )
+            + ")"
+        ),
+    )
     fake.add_argument("--tag", action="append", default=[], dest="tags")
     fake.add_argument("--notes", default="")
     fake.add_argument(
@@ -192,6 +210,55 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-pack", action="store_true", help="leave the run directory unpacked"
     )
     fake.set_defaults(func=_cmd_fake_run)
+
+    diff = sub.add_parser(
+        "diff",
+        help="compare two run bundles and print what changed",
+        description=(
+            "Joins two runs on their call paths and reports the paths that "
+            "grew, the paths that shrank, and -- separately, because they are "
+            "usually the finding -- the paths that exist in only one of them. "
+            "This is the same computation as the viewer's Diff screen."
+        ),
+    )
+    diff.add_argument("before", type=Path, metavar="A", help="the baseline run")
+    diff.add_argument("after", type=Path, metavar="B", help="the run to compare against it")
+    diff.add_argument(
+        "--kind",
+        action="append",
+        dest="kinds",
+        choices=[entry[0] for entry in diff_mod.STACK_KINDS],
+        help="stack file to compare (repeatable; default: every kind both runs have)",
+    )
+    diff.add_argument(
+        "--raw",
+        action="store_true",
+        help=(
+            "compare raw counts instead of each run's share of its own total; "
+            "only meaningful when the two runs are the same length"
+        ),
+    )
+    diff.add_argument(
+        "--per-thread",
+        action="store_true",
+        help="keep the thread name frame, so the same path in two threads stays separate",
+    )
+    diff.add_argument("--thread", default="", help="only paths whose thread name matches")
+    diff.add_argument(
+        "--min-share",
+        type=float,
+        default=diff_mod.DEFAULT_MIN_SHARE,
+        metavar="F",
+        help=(
+            "ignore paths below this share of both runs "
+            f"(default {diff_mod.DEFAULT_MIN_SHARE}; 0 keeps everything)"
+        ),
+    )
+    diff.add_argument(
+        "--top", type=int, default=diff_mod.DEFAULT_TOP, help="rows per section"
+    )
+    diff.add_argument("--json", action="store_true")
+    diff.set_defaults(func=_cmd_diff)
 
     schema = sub.add_parser("schema", help="show the bundle schemas this build enforces")
     schema.add_argument("name", nargs="?", help="schema file to print, e.g. manifest")
@@ -303,6 +370,7 @@ def _cmd_fake_run(args: argparse.Namespace) -> int:
         pid=args.pid,
         profile=args.profile,
         seed=args.seed,
+        load=args.load,
         degraded=args.degraded,
         bad_frame_pointers=args.bad_frame_pointers,
         tags=args.tags or ["synthetic"],
@@ -313,6 +381,30 @@ def _cmd_fake_run(args: argparse.Namespace) -> int:
     if archive != run_dir:
         print(f"bundle:        {archive}")
     print(f"inspect with:  {PROG} inspect {archive}")
+    return EXIT_OK
+
+
+def _cmd_diff(args: argparse.Namespace) -> int:
+    with Bundle.open(args.before) as before, Bundle.open(args.after) as after:
+        result = diff_mod.compare(
+            before,
+            after,
+            kinds=args.kinds,
+            normalise=not args.raw,
+            merge_threads=not args.per_thread,
+            thread_filter=args.thread,
+            min_share=args.min_share,
+        )
+        if args.json:
+            print(json.dumps(result.to_dict(top=args.top), indent=2))
+        else:
+            print(diff_mod.render(result, top=args.top))
+        if not result.stacks:
+            print(
+                "\nno stack file is present in both runs; only the thread "
+                "comparison above could be made",
+                file=sys.stderr,
+            )
     return EXIT_OK
 
 
@@ -338,11 +430,7 @@ def _cmd_not_implemented(args: argparse.Namespace) -> int:
         f"{PROG} {args._name}: not implemented yet ({args._reason}).",
         file=sys.stderr,
     )
-    print(
-        "This milestone (M0) fixes the bundle format only. "
-        "See README.md for the milestone plan.",
-        file=sys.stderr,
-    )
+    print("See README.md for the milestone plan.", file=sys.stderr)
     return EXIT_NOT_IMPLEMENTED
 
 

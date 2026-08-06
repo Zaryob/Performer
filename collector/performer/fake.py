@@ -19,11 +19,13 @@ from __future__ import annotations
 
 import datetime as _dt
 import random
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import layout
 from .bundle import BundleBuilder
+from .errors import PerformerError
 from .manifest import (
     ProbeResult,
     Quality,
@@ -76,6 +78,100 @@ _FUTEX_STACKS: Sequence[Tuple[str, int]] = (
      "pthread_mutex_lock", 120_000,),
 )
 
+# --------------------------------------------------------------------------
+# load scenarios
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LoadScenario:
+    """The same application, working harder.
+
+    A diff needs two runs to compare, and two runs that differ only by a
+    random seed are a poor test of one: the differences are noise, evenly
+    spread, with nothing a correct tool should surface above anything else.
+    This models the change an operator is actually looking for -- a workload
+    that pushed the same code down the same paths at different rates, and one
+    path that did not exist at the lighter load at all.
+
+    Which paths grow is not arbitrary either.  They are the three the project
+    exists to investigate: one shared timer mutex, the glibc malloc arena, and
+    idle time that disappears as the process saturates.
+    """
+
+    description: str
+    #: Substring of a stack template -> multiplier for its weight.  The first
+    #: match wins, so more specific patterns come first.
+    scale: Sequence[Tuple[str, float]] = ()
+    #: Stack kind -> call paths that exist only at this load.  Real load does
+    #: not merely make the same code slower; past a threshold it takes
+    #: different code, and that is the finding a diff should make obvious.
+    extra: Dict[str, Sequence[Tuple[str, int]]] = field(default_factory=dict)
+
+
+LOAD_SCENARIOS: Dict[str, LoadScenario] = {
+    "steady": LoadScenario(description="the reference workload"),
+    "heavy": LoadScenario(
+        description="the same process under roughly twice the message rate",
+        scale=(
+            # The single timer mutex is the suspected bottleneck, and it is
+            # superlinear: twice the work, three times the contention.
+            ("TimerWheel::arm", 3.2),
+            ("TimerWheel::cancel", 2.6),
+            ("TimerWheel::tick", 1.4),
+            # Arena contention grows with allocating threads, not allocations.
+            ("arena_get2", 2.9),
+            ("_int_malloc", 1.9),
+            ("MemPool::allocate", 2.2),
+            # Useful work grows roughly with the rate.
+            ("UserLogic::compute", 1.8),
+            ("EventQueue", 1.7),
+            # And the idle waits shrink as the process saturates.
+            ("epoll_wait", 0.35),
+            ("clock_nanosleep", 0.4),
+        ),
+        extra={
+            # Backpressure: code that simply does not run while the queue
+            # keeps up. A pair of flame graphs side by side would not make
+            # this obvious; a diff should.
+            "oncpu": (
+                (f"{DEFAULT_COMM};start_thread;WorkerThread::run();"
+                 "EventQueue::push();EventQueue::grow();operator new;"
+                 "_int_malloc;arena_get2", 540),
+                (f"{DEFAULT_COMM};start_thread;WorkerThread::run();"
+                 "Backpressure::throttle();clock_gettime", 210),
+            ),
+            "offcpu": (
+                (f"{DEFAULT_COMM};start_thread;WorkerThread::run();"
+                 "Backpressure::throttle();pthread_cond_wait;futex_wait",
+                 1_380_000),
+            ),
+            "futex": (
+                (f"{DEFAULT_COMM};start_thread;WorkerThread::run();"
+                 "Backpressure::throttle();pthread_cond_wait", 1_340_000),
+            ),
+        },
+    ),
+}
+
+DEFAULT_LOAD = "steady"
+
+
+def _apply_load(
+    templates: Sequence[Tuple[str, int]], scenario: LoadScenario, kind: str
+) -> List[Tuple[str, int]]:
+    scaled: List[Tuple[str, int]] = []
+    for stack, base in templates:
+        factor = 1.0
+        for needle, multiplier in scenario.scale:
+            if needle in stack:
+                factor = multiplier
+                break
+        scaled.append((stack, max(1, int(base * factor))))
+    scaled.extend(scenario.extra.get(kind, ()))
+    return scaled
+
+
 _THREAD_NAME_POOL: Sequence[str] = (
     "TimerWheel",
     "event-disp",
@@ -105,7 +201,9 @@ _LEAF_VARIANTS: Sequence[str] = (
 
 
 def _spread_over_threads(
-    rng: random.Random,
+    seed: int,
+    kind: str,
+    load: str,
     templates: Sequence[Tuple[str, int]],
     roster: Sequence[Tuple[int, str]],
     broken_stacks: bool = False,
@@ -116,6 +214,19 @@ def _spread_over_threads(
     expensive each is -- and this spreads them across the real thread roster
     with the leaf variation and the long tail a genuine profile has.
 
+    Every random choice is drawn from a stream keyed by *what it is about*
+    rather than from one shared generator, and this is what makes the result
+    usable as a diff fixture. Two bundles generated with the same seed and
+    different loads have to be the same application doing the same things at
+    different rates; with a single shared stream they are not, because adding
+    one call path to a scenario shifts every subsequent draw and the two runs
+    come out structurally unrelated. Keying each draw by ``(seed, thread,
+    template)`` means the structure is identical between loads and only the
+    load's own effect differs -- so what a diff finds is the load, which is
+    the point. Run to run noise is still there: the jitter stream includes
+    the load name, so every path carries an independent +/-15%, and a tool
+    that cannot see past that is not much use on real measurements either.
+
     ``broken_stacks`` models a target built without frame pointers. That does
     not add unresolved stacks alongside good ones: it means the walker gets a
     frame or two and then gives up, so the *same* stacks come back truncated
@@ -124,22 +235,29 @@ def _spread_over_threads(
     way it will on a real unresolvable target.
     """
     folded: List[Tuple[str, int]] = []
-    for _tid, thread_name in roster:
+    for tid, thread_name in roster:
         # Not every thread walks every path, and the busiest few dominate.
-        weight = rng.choice((0.02, 0.05, 0.1, 0.3, 1.0, 1.0, 2.5))
+        weight = random.Random(f"{seed}:{kind}:{tid}").choice(
+            (0.02, 0.05, 0.1, 0.3, 1.0, 1.0, 2.5)
+        )
         for stack, base in templates:
-            if rng.random() > 0.55:
+            shape = random.Random(f"{seed}:{kind}:{tid}:{stack}")
+            rng = random.Random(f"{seed}:{kind}:{load}:{tid}:{stack}")
+            if shape.random() > 0.55:
                 continue
             root, _, tail = stack.partition(";")
             # The template's own root is the process name, which the thread
             # name replaces -- except for a single frame template such as
             # "[unknown]", which has no process prefix to replace.
             frames = (tail if tail else root).split(";")
+            # Which leaf a path grows, and where an unresolvable walk gives
+            # up, are properties of the code rather than of the load, so they
+            # come from the shape stream and stay put between scenarios.
             if broken_stacks:
-                keep = rng.randint(0, 1)
-                frames = frames[:keep] + ["[unknown]"] * rng.randint(1, 3)
+                keep = shape.randint(0, 1)
+                frames = frames[:keep] + ["[unknown]"] * shape.randint(1, 3)
             else:
-                leaf = rng.choice(_LEAF_VARIANTS)
+                leaf = shape.choice(_LEAF_VARIANTS)
                 if leaf:
                     frames = frames + leaf.lstrip(";").split(";")
             scaled = max(1, int(base * weight / max(1, len(roster) // 12)))
@@ -251,6 +369,7 @@ def generate(
     pid: int = DEFAULT_PID,
     profile: str = "standard",
     seed: int = 20260806,
+    load: str = DEFAULT_LOAD,
     degraded: bool = False,
     bad_frame_pointers: bool = False,
     tags: Sequence[str] = ("synthetic",),
@@ -262,8 +381,17 @@ def generate(
 
     ``degraded`` produces the awkward case the viewer must handle: a probe
     that failed its smoke test, a probe that lost events, and a target that
-    died mid-run.  Returns ``(run_dir, archive_or_run_dir)``.
+    died mid-run.  ``load`` selects a :class:`LoadScenario`, which is how two
+    bundles that differ the way two real measurements of the same process
+    differ are produced.  Returns ``(run_dir, archive_or_run_dir)``.
     """
+    try:
+        scenario = LOAD_SCENARIOS[load]
+    except KeyError:
+        raise PerformerError(
+            f"unknown load scenario {load!r}; available: "
+            + ", ".join(sorted(LOAD_SCENARIOS))
+        ) from None
     rng = random.Random(seed)
     started = started_at or utc_now()
     builder = BundleBuilder(out_dir, label=label, started_at=started)
@@ -349,15 +477,36 @@ def generate(
     # 315 thread process holds thousands of distinct stacks, and a viewer that
     # has only ever been shown eight has not been shown the problem it exists
     # to solve.
-    oncpu = _spread_over_threads(rng, _ONCPU_STACKS, roster, bad_frame_pointers)
+    oncpu = _spread_over_threads(
+        seed,
+        "oncpu",
+        load,
+        _apply_load(_ONCPU_STACKS, scenario, "oncpu"),
+        roster,
+        bad_frame_pointers,
+    )
     builder.add_folded(layout.STACK_ONCPU, oncpu)
     builder.add_folded(
         layout.STACK_OFFCPU,
-        _spread_over_threads(rng, _OFFCPU_STACKS, roster, bad_frame_pointers),
+        _spread_over_threads(
+            seed,
+            "offcpu",
+            load,
+            _apply_load(_OFFCPU_STACKS, scenario, "offcpu"),
+            roster,
+            bad_frame_pointers,
+        ),
     )
     builder.add_folded(
         layout.STACK_FUTEX,
-        _spread_over_threads(rng, _FUTEX_STACKS, roster, bad_frame_pointers),
+        _spread_over_threads(
+            seed,
+            "futex",
+            load,
+            _apply_load(_FUTEX_STACKS, scenario, "futex"),
+            roster,
+            bad_frame_pointers,
+        ),
     )
 
     # -- histograms and tables ----------------------------------------
@@ -654,7 +803,11 @@ def generate(
             "distro": "Ubuntu 22.04.3 LTS",
         },
         tags=list(tags),
-        notes=notes or "Synthetic bundle produced by 'performer fake-run'. Not real data.",
+        notes=notes
+        or (
+            "Synthetic bundle produced by 'performer fake-run'. Not real data. "
+            f"Load scenario: {load} -- {scenario.description}."
+        ),
         target_died_at=target_died_at,
         warnings=(
             ["target process exited before the requested duration elapsed"]

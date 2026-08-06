@@ -30,11 +30,11 @@ lab box, so it uses **nothing outside the Python standard library** — no pip,
 no virtualenv, no network. The viewer is a static bundle that works from
 `file://`, so it needs no server and parses bundles entirely client-side.
 
-## Status: M3 complete
+## Status: M4 complete
 
-M0 fixed the contract, M1 made one probe real, M2 completed the collector, and
-M3 makes the data readable: a static viewer that opens by double click and
-renders a 315-thread profile in a fifth of a second.
+M0 fixed the contract, M1 made one probe real, M2 completed the collector, M3
+made the data readable, and M4 makes two runs comparable — which is the point,
+since nobody profiles a process once.
 
 | Milestone | Scope | State |
 |---|---|---|
@@ -42,13 +42,12 @@ renders a 315-thread profile in a fifth of a second.
 | **M1** | `preflight.py`, `collect` with `oncpu.bt`, folded stacks, real bundles | **done** |
 | **M2** | Full probe set, YAML profiles, histogram/table parsers, partial bundles | **done** |
 | **M3** | Viewer: bundle loading, Overview, Flame (filter + search), Threads | **done** |
-| M4 | Diff screen, differential flame graph, normalisation | todo |
+| **M4** | Diff screen, differential flame graph, normalisation, `performer diff` | **done** |
 | M5 | Locks table, wakeup graph, automatic verdict sentence | todo |
 | M6 | localhost daemon, click-to-collect | todo |
 
-`diff` and `daemon` are registered as commands today and exit with code 3 and
-an explicit "not implemented in this milestone" message. They never pretend to
-have worked.
+`daemon` is registered as a command today and exits with code 3 and an explicit
+"not implemented in this milestone" message. It never pretends to have worked.
 
 ## Profiles
 
@@ -197,9 +196,10 @@ an error-level flag exit 1, which is what a future CI gate would use.
 | `preflight --pid N` | Run the environment checks without collecting. `--skip-trials`, `--json` |
 | `inspect <bundle>...` | Manifest summary, quality flags, schema check. `--json`, `--strict`, `--verbose`, `--no-validate` |
 | `validate <bundle>...` | Schema + cross-field validation only, exit 1 on failure. `--verify-hashes` |
-| `fake-run` | Write a synthetic bundle. `--degraded`, `--bad-frame-pointers`, `--threads`, `--seed`, `--no-pack` |
+| `diff A B` | Compare two runs: movers, new and vanished call paths, thread deltas. `--kind`, `--raw`, `--per-thread`, `--thread`, `--min-share`, `--top`, `--json` |
+| `fake-run` | Write a synthetic bundle. `--load steady\|heavy`, `--degraded`, `--bad-frame-pointers`, `--threads`, `--seed`, `--no-pack` |
 | `schema [name]` | Show or print the schemas this build enforces |
-| `diff` / `daemon` | Registered, not implemented (exit 3) |
+| `daemon` | Registered, not implemented (exit 3) |
 
 Bundles are accepted as either a `.tgz` or an unpacked run directory.
 
@@ -220,6 +220,7 @@ because there is nowhere to upload to.
 | **Overview** | what this run measured, which probes delivered, and the quality block |
 | **Flame** | where the time goes — on-CPU, off-CPU or futex, with search, zoom, icicle mode, a thread filter and an idle-thread cutoff |
 | **Threads** | every thread's CPU and runqueue time, sortable — read from `/proc`, so it survives total probe failure |
+| **Diff** | what changed between two runs: a differential flame graph, the biggest movers, and the call paths that appeared or vanished |
 
 Two decisions the 315-thread case forced. The graph is drawn on a **canvas**,
 not as SVG: tens of thousands of DOM rects take seconds to lay out and stutter
@@ -232,6 +233,54 @@ reason to ask.
 A run whose stacks could not be resolved gets a banner **on the graph itself**,
 not just a flag elsewhere: a flame graph over `[unknown]` frames looks exactly
 like a real one, which is what makes it dangerous.
+
+## Comparing two runs
+
+Nobody profiles a process once. The comparison is the deliverable, and it is
+available both on the Diff screen and in a terminal:
+
+```console
+$ performer diff before.tgz after.tgz
+```
+
+```
+A  steady60  20260806T222835Z-steady60  [ok]
+B  heavy90   20260806T222836Z-heavy90   [ok]
+
+   duration   60 s -> 90 s      profile  standard -> standard
+
+oncpu  (17,109 -> 39,537 samples, compared as share of each run)
+   60 paths compared; 19.09% grew, 19.09% shrank
+
+          A         B      delta     rel  call path (leaf last)
+      3.63%     5.30%     +1.67%    +46%  ...TimerWheel::arm();__lll_lock_wait;std::_Rb_tree_increment
+      7.05%     5.45%     -1.61%    -23%  ...UserLogic::onEvent();UserLogic::compute();__memmove_avx
+      0.00%     1.42%     +1.42%     new  ...EventQueue::grow();operator new;_int_malloc;arena_get2
+```
+
+Three decisions do most of the work:
+
+* **Shares, not counts.** Both runs are divided by their own total by default.
+  Comparing raw counts across a 60 s and a 90 s run is the standard way to
+  read a diff backwards: everything in the longer one "grew". The corollary is
+  worth stating — a path with an *unchanged* sample count is reported as
+  having **fallen**, because it did.
+* **New and vanished paths get their own lists.** "This call path did not
+  exist before" is a stronger finding than any percentage, and it is exactly
+  what a table sorted by delta buries. `--min-share` sets a noise floor, and
+  what it removed is counted rather than hidden.
+* **Frames are normalised before the join.** Offsets and module suffixes are
+  stripped, so `_int_malloc+0x1f4` and `_int_malloc+0x2a0` are one path and a
+  rebuilt binary does not read as a rewrite.
+
+Threads are compared **by name**, not by tid: tids are not stable across runs,
+so a per-tid comparison reports the whole pool destroyed and recreated every
+time. Times are per second of run, for the same reason shares are used above.
+
+`fake-run --load heavy` writes a synthetic bundle that differs from the
+`steady` one the way a real process under more load would — the same seed
+gives both runs the same thread roster and the same code paths, so what a diff
+finds is the load rather than the random number generator.
 
 ## Bundle format
 
@@ -387,9 +436,19 @@ literally.
    its own small YAML reader.
 8. **The flame graph uses no d3.** The spec says to draw it by hand rather than
    with `d3-flame-graph`, which cannot express M4's differential mode — that
-   part is honoured. But once the renderer is a canvas, d3 contributes nothing
-   a few lines of arithmetic do not, so a quarter of a megabyte of dependency
-   would be paid for nothing in a file that has to be opened offline.
+   part is honoured, and M4 collected on it: the Diff screen reuses the same
+   renderer with a `colourFor` hook rather than adding a second one. But once
+   the renderer is a canvas, d3 contributes nothing a few lines of arithmetic
+   do not, so a quarter of a megabyte of dependency would be paid for nothing
+   in a file that has to be opened offline.
+9. **The differential graph is drawn at `a + b` wide, not `b` wide.**
+   `difffolded.pl` takes widths from the newer run, which makes a call path
+   that *vanished* zero pixels wide — often the most interesting thing that
+   happened — and answers that with a second, negated graph. The additive
+   basis puts both directions on one picture, and it is also the only choice
+   that keeps a flame graph layout valid: a parent must be at least as wide as
+   its children, `a + b` is additive and the intuitive `max(a, b)` is not.
+   The conventional single-run bases are still one dropdown away.
 
 ## Licence
 

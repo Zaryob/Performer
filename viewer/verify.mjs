@@ -1,11 +1,17 @@
 /**
- * M3 acceptance check.
+ * M3 and M4 acceptance checks.
  *
  * Opens the built `dist/index.html` over `file://` -- the way it will actually
- * be used, with no server anywhere -- loads a real bundle through the file
- * picker, and times how long the flame graph takes to appear.
+ * be used, with no server anywhere -- loads real bundles through the file
+ * picker, times how long the flame graph takes to appear, and then compares
+ * two of them.
  *
  *   node verify.mjs <bundle.tgz> [more.tgz ...]
+ *
+ * With two or more bundles the M4 section runs: the first two are diffed and
+ * the canvas is sampled to prove that paths which grew and paths which shrank
+ * are actually drawn in distinguishable colours, which is what "the differing
+ * code paths can be told apart" has to mean if it is to be checked at all.
  */
 
 import { chromium } from "playwright";
@@ -147,11 +153,11 @@ await page.waitForTimeout(150);
 check("Threads table sorts", true);
 
 // -- the unusable run -------------------------------------------------------
-// The second bundle was collected from a target without frame pointers. The
+// The last bundle was collected from a target without frame pointers. The
 // viewer must refuse to let anyone argue from that graph, not merely draw it.
-if (bundles.length > 1) {
+if (bundles.length > 2) {
   await page.getByRole("button", { name: "Runs", exact: true }).click();
-  await page.locator("main table tbody tr").nth(1).click();
+  await page.locator("main table tbody tr").nth(bundles.length - 1).click();
   await page.getByRole("button", { name: "Flame", exact: true }).click();
   await page.waitForSelector("canvas");
   const warning = await page.locator("main").innerText();
@@ -161,10 +167,135 @@ if (bundles.length > 1) {
       warning.includes("-fno-omit-frame-pointer"),
   );
   await page.screenshot({ path: "verify-broken.png" });
+
+  // And a diff involving it must say so too: comparing unresolved stacks
+  // against anything produces a confident picture of nothing.
+  await page.getByRole("button", { name: "Diff", exact: true }).click();
+  await page.waitForSelector("text=A — before");
+  const brokenDiff = await page.locator("main").innerText();
+  check(
+    "a diff against an unusable run is flagged, not quietly drawn",
+    /confident picture of nothing/.test(brokenDiff),
+  );
+}
+
+// -- Diff: the M4 acceptance measurement ------------------------------------
+if (bundles.length > 1) {
+  console.log("\ncomparing the first two runs");
+  await page.getByRole("button", { name: "Diff", exact: true }).click();
+  await page.waitForSelector("text=A — before");
+
+  // Pick the pair explicitly rather than relying on which one loaded first:
+  // the check is about the comparison, not about the default selection.
+  const options = await page
+    .getByLabel("baseline run A")
+    .locator("option")
+    .evaluateAll((nodes) => nodes.map((n) => n.value).filter(Boolean));
+  await page.getByLabel("baseline run A").selectOption(options[0]);
+  await page.getByLabel("comparison run B").selectOption(options[1]);
+
+  const diffStarted = Date.now();
+  await page.waitForSelector("canvas", { timeout: 30_000 });
+  await page.evaluate(
+    () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+  );
+  const diffMs = Date.now() - diffStarted;
+  check("differential flame graph rendered in under 2 s", diffMs < 2000, `${diffMs} ms`);
+
+  // The acceptance criterion is that the differing code paths can be told
+  // apart, so read the pixels back and classify them. Red means the path grew
+  // in B, blue that it shrank; a graph with only one of them, or with neither,
+  // has not distinguished anything.
+  const shading = await page.evaluate(() => {
+    const canvas = document.querySelector("canvas");
+    const ctx = canvas.getContext("2d");
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let grew = 0;
+    let shrank = 0;
+    let flat = 0;
+    for (let i = 0; i < data.length; i += 4 * 13) {
+      const [r, g, b, a] = [data[i], data[i + 1], data[i + 2], data[i + 3]];
+      if (a === 0) continue;
+      if (r - b > 30) grew += 1;
+      else if (b - r > 30) shrank += 1;
+      else if (Math.abs(r - g) < 12 && Math.abs(g - b) < 12) flat += 1;
+    }
+    return { grew, shrank, flat };
+  });
+  check(
+    "paths that grew and paths that shrank are drawn in different colours",
+    shading.grew > 200 && shading.shrank > 200,
+    `${shading.grew} red, ${shading.shrank} blue, ${shading.flat} unchanged sampled pixels`,
+  );
+
+  const diffText = await page.locator("main").innerText();
+  check(
+    "the comparison says it normalised the two runs",
+    /shares, so the .* and .* runs are on the same scale/.test(diffText),
+  );
+  check(
+    "call paths present in only one run are listed separately",
+    /New in B/.test(diffText) && /Gone from B/.test(diffText),
+  );
+
+  const movers = await page
+    .locator("main table tbody tr")
+    .first()
+    .innerText()
+    .catch(() => "");
+  check("the biggest movers table has rows", movers.length > 0, movers.split("\n")[0] ?? "");
+
+  // The synthetic pair models a heavier load on the same process, and the
+  // thing it was built to make findable is the shared timer mutex.
+  await page.getByPlaceholder("e.g. __lll_lock_wait").fill("__lll_lock_wait");
+  await page.waitForTimeout(400);
+  const searched2 = await page.locator("main").innerText();
+  const matched2 = Number(searched2.match(/matched ([\d.]+)%/)?.[1] ?? "0");
+  check(
+    "searching the differential graph still finds and quantifies a frame",
+    matched2 > 0,
+    `${matched2}% of the combined profile`,
+  );
+  await page.getByPlaceholder("e.g. __lll_lock_wait").fill("");
+
+  await page.screenshot({ path: "verify-diff.png", fullPage: false });
+
+  // "B only" is difffolded.pl's default layout and it hides anything that
+  // vanished. The default here is A + B precisely so it does not, and both
+  // have to actually work.
+  await page.getByLabel("layout basis").selectOption("after");
+  await page.waitForTimeout(300);
+  const afterOnly = await page.evaluate(() => {
+    const canvas = document.querySelector("canvas");
+    const ctx = canvas.getContext("2d");
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let filled = 0;
+    for (let i = 3; i < data.length; i += 4 * 97) if (data[i] > 0) filled += 1;
+    return filled;
+  });
+  check("the layout basis can be switched", afterOnly > 100, `${afterOnly} sampled pixels`);
+  await page.getByLabel("layout basis").selectOption("both");
+
+  // -- thread deltas --------------------------------------------------------
+  await page.getByRole("button", { name: "Threads", exact: true }).click();
+  await page.waitForSelector("text=Versus");
+  const threadDiffText = await page.locator("main").innerText();
+  check(
+    "threads are compared by name, with the reason stated",
+    /tids are not stable across runs/.test(threadDiffText),
+  );
+  check(
+    // Case insensitive: the table headers are uppercased by CSS, and
+    // innerText reports what is on screen rather than what is in the markup.
+    "thread deltas are per second so run lengths do not matter",
+    /CPU ms\/s/i.test(threadDiffText) && /runq ms\/s/i.test(threadDiffText),
+  );
 }
 
 check("no console errors", consoleErrors.length === 0, consoleErrors.join(" | "));
 
+await page.getByRole("button", { name: "Threads", exact: true }).click();
+await page.waitForSelector("main table tbody tr");
 await page.screenshot({ path: "verify-threads.png", fullPage: false });
 await page.getByRole("button", { name: "Flame", exact: true }).click();
 await page.waitForSelector("canvas");

@@ -4,11 +4,20 @@
  * Built from `meta/threads.json`, which comes from /proc rather than from a
  * probe. That matters: this is the one screen that still has something to say
  * when every eBPF probe failed.
+ *
+ * With a baseline run selected it also compares -- but by thread *name*, not
+ * by tid. Tids are not stable across runs: restart the process and the same
+ * worker is a different number, so a per-tid diff would report 315 threads
+ * destroyed and 315 created every time. Names are what a thread pool actually
+ * has in common between runs, and grouping by them answers the question that
+ * matters here anyway: did this pool grow, and did its threads spend longer
+ * waiting for the CPU.
  */
 
 import { useMemo, useState } from "react";
 import type { Bundle } from "../bundle/load";
-import type { Schedstat } from "../bundle/types";
+import { runDuration } from "../bundle/load";
+import type { Schedstat, ThreadsDoc } from "../bundle/types";
 import { Empty, Panel } from "../components/ui";
 
 interface Row {
@@ -58,7 +67,13 @@ function delta(
   return Math.max(0, to - from);
 }
 
-export function Threads({ bundle }: { bundle: Bundle }) {
+export function Threads({
+  bundle,
+  baseline = null,
+}: {
+  bundle: Bundle;
+  baseline?: Bundle | null;
+}) {
   const [sortKey, setSortKey] = useState<SortKey>("cpuMs");
   const [ascending, setAscending] = useState(false);
   const [filter, setFilter] = useState("");
@@ -124,7 +139,9 @@ export function Threads({ bundle }: { bundle: Bundle }) {
   };
 
   return (
-    <Panel
+    <div className="space-y-4">
+      {baseline && <ThreadDelta a={baseline} b={bundle} />}
+      <Panel
       title={`Threads (${visible.length.toLocaleString()} of ${rows.length.toLocaleString()})`}
       right={
         <input
@@ -197,6 +214,225 @@ export function Threads({ bundle }: { bundle: Bundle }) {
                 {totals.wait.toFixed(0)}
               </td>
               <td colSpan={4} />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      </Panel>
+    </div>
+  );
+}
+
+// -- comparison against a baseline run --------------------------------------
+
+interface NameGroup {
+  name: string;
+  count: number;
+  cpuMs: number;
+  waitMs: number;
+}
+
+/**
+ * Sum every thread with the same name into one row, and divide by the run's
+ * length.
+ *
+ * Both halves matter. Summing is what makes the two runs joinable at all,
+ * since a 200 thread pool and a 315 thread pool have no tids in common and no
+ * one-to-one correspondence to find. Dividing by the duration is what stops a
+ * 90 s run looking like a regression against a 60 s one -- the same mistake
+ * normalisation prevents on the Diff screen, in the same place.
+ */
+function groupByName(doc: ThreadsDoc | null, seconds: number): Map<string, NameGroup> {
+  const groups = new Map<string, NameGroup>();
+  if (!doc) return groups;
+  const scale = seconds > 0 ? 1 / seconds : 0;
+  for (const entry of Object.values(doc.threads)) {
+    const group = groups.get(entry.name) ?? {
+      name: entry.name,
+      count: 0,
+      cpuMs: 0,
+      waitMs: 0,
+    };
+    group.count += 1;
+    group.cpuMs += (delta(entry.start_schedstat, entry.end_schedstat, "run_ns") / 1e6) * scale;
+    group.waitMs +=
+      (delta(entry.start_schedstat, entry.end_schedstat, "wait_ns") / 1e6) * scale;
+    groups.set(entry.name, group);
+  }
+  return groups;
+}
+
+interface DeltaRow {
+  name: string;
+  countA: number;
+  countB: number;
+  cpuA: number;
+  cpuB: number;
+  waitA: number;
+  waitB: number;
+}
+
+function signed(value: number, digits = 1): string {
+  if (Math.abs(value) < 0.05 / 10 ** (digits - 1)) return "—";
+  return `${value > 0 ? "+" : "−"}${Math.abs(value).toFixed(digits)}`;
+}
+
+function ThreadDelta({ a, b }: { a: Bundle; b: Bundle }) {
+  const [sortBy, setSortBy] = useState<"wait" | "cpu" | "count">("wait");
+
+  const rows = useMemo<DeltaRow[]>(() => {
+    const left = groupByName(a.threads, runDuration(a.manifest));
+    const right = groupByName(b.threads, runDuration(b.manifest));
+    const names = new Set([...left.keys(), ...right.keys()]);
+    return [...names].map((name) => {
+      const x = left.get(name);
+      const y = right.get(name);
+      return {
+        name,
+        countA: x?.count ?? 0,
+        countB: y?.count ?? 0,
+        cpuA: x?.cpuMs ?? 0,
+        cpuB: y?.cpuMs ?? 0,
+        waitA: x?.waitMs ?? 0,
+        waitB: y?.waitMs ?? 0,
+      };
+    });
+  }, [a, b]);
+
+  const sorted = useMemo(() => {
+    const key = (row: DeltaRow) =>
+      sortBy === "cpu"
+        ? Math.abs(row.cpuB - row.cpuA)
+        : sortBy === "count"
+          ? Math.abs(row.countB - row.countA)
+          : Math.abs(row.waitB - row.waitA);
+    return [...rows].sort((x, y) => key(y) - key(x) || x.name.localeCompare(y.name));
+  }, [rows, sortBy]);
+
+  if (!rows.length) {
+    return (
+      <Panel title="Versus baseline">
+        <Empty>Neither run has a thread inventory to compare.</Empty>
+      </Panel>
+    );
+  }
+
+  const totals = rows.reduce(
+    (acc, row) => ({
+      countA: acc.countA + row.countA,
+      countB: acc.countB + row.countB,
+      cpuA: acc.cpuA + row.cpuA,
+      cpuB: acc.cpuB + row.cpuB,
+      waitA: acc.waitA + row.waitA,
+      waitB: acc.waitB + row.waitB,
+    }),
+    { countA: 0, countB: 0, cpuA: 0, cpuB: 0, waitA: 0, waitB: 0 },
+  );
+
+  return (
+    <Panel
+      title={`Versus ${a.manifest.label}`}
+      right={
+        <label className="flex items-center gap-2 text-xs text-slate-400">
+          sort by
+          <select
+            value={sortBy}
+            onChange={(event) =>
+              setSortBy(event.target.value as "wait" | "cpu" | "count")
+            }
+            className="rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm text-slate-100"
+          >
+            <option value="wait">runqueue change</option>
+            <option value="cpu">CPU change</option>
+            <option value="count">thread count change</option>
+          </select>
+        </label>
+      }
+    >
+      <p className="mb-2 text-xs text-slate-500">
+        Grouped by thread name, because tids are not stable across runs — a
+        restarted process has none of the same ones. Times are per second of
+        run, so the {a.manifest.duration_s.toFixed(0)} s and{" "}
+        {b.manifest.duration_s.toFixed(0)} s runs are on the same scale.
+      </p>
+      <div className="max-h-96 overflow-auto">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-slate-900 text-left text-xs uppercase tracking-wide text-slate-400">
+            <tr>
+              <th className="py-1 pr-3">name</th>
+              <th className="py-1 pr-3 text-right" colSpan={2} title="threads with this name">
+                threads
+              </th>
+              <th className="py-1 pr-3 text-right" colSpan={2} title="CPU ms per second of run">
+                CPU ms/s
+              </th>
+              <th className="py-1 text-right" colSpan={2} title="runqueue ms per second of run">
+                runq ms/s
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((row) => (
+              <tr key={row.name} className="border-t border-slate-800">
+                <td className="py-1 pr-3 font-mono text-slate-100">{row.name}</td>
+                <td className="py-1 pr-1 text-right tabular-nums text-slate-400">
+                  {row.countA} → {row.countB}
+                </td>
+                <td
+                  className={`py-1 pr-3 text-right tabular-nums ${
+                    row.countB > row.countA
+                      ? "text-rose-300"
+                      : row.countB < row.countA
+                        ? "text-sky-300"
+                        : "text-slate-600"
+                  }`}
+                >
+                  {row.countB === row.countA ? "—" : signed(row.countB - row.countA, 0)}
+                </td>
+                <td className="py-1 pr-1 text-right tabular-nums text-slate-400">
+                  {row.cpuA.toFixed(1)} → {row.cpuB.toFixed(1)}
+                </td>
+                <td
+                  className={`py-1 pr-3 text-right tabular-nums ${
+                    row.cpuB > row.cpuA ? "text-rose-300" : "text-sky-300"
+                  }`}
+                >
+                  {signed(row.cpuB - row.cpuA)}
+                </td>
+                <td className="py-1 pr-1 text-right tabular-nums text-slate-400">
+                  {row.waitA.toFixed(1)} → {row.waitB.toFixed(1)}
+                </td>
+                <td
+                  className={`py-1 text-right tabular-nums ${
+                    row.waitB > row.waitA ? "text-rose-300" : "text-sky-300"
+                  }`}
+                >
+                  {signed(row.waitB - row.waitA)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot className="sticky bottom-0 bg-slate-900 text-xs text-slate-300">
+            <tr className="border-t border-slate-700">
+              <td className="py-1 pr-3">all threads</td>
+              <td className="py-1 pr-1 text-right tabular-nums">
+                {totals.countA} → {totals.countB}
+              </td>
+              <td className="py-1 pr-3 text-right tabular-nums">
+                {signed(totals.countB - totals.countA, 0)}
+              </td>
+              <td className="py-1 pr-1 text-right tabular-nums">
+                {totals.cpuA.toFixed(1)} → {totals.cpuB.toFixed(1)}
+              </td>
+              <td className="py-1 pr-3 text-right tabular-nums">
+                {signed(totals.cpuB - totals.cpuA)}
+              </td>
+              <td className="py-1 pr-1 text-right tabular-nums">
+                {totals.waitA.toFixed(1)} → {totals.waitB.toFixed(1)}
+              </td>
+              <td className="py-1 text-right tabular-nums">
+                {signed(totals.waitB - totals.waitA)}
+              </td>
             </tr>
           </tfoot>
         </table>

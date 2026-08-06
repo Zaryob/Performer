@@ -109,7 +109,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("unknown_frame_ratio", out)
 
     def test_unimplemented_commands_exit_three(self):
-        for command in ("diff", "daemon"):
+        for command in ("daemon",):
             with self.subTest(command=command):
                 code, _, err = run_cli(command)
                 self.assertEqual(code, 3)
