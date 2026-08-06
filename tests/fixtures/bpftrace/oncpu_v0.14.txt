@@ -1,0 +1,40 @@
+Attaching 2 probes...
+
+
+@cpu[
+    __schedule+723
+    schedule+70
+    futex_wait_queue_me+164
+    futex_wait+266
+, 
+    __lll_lock_wait+40
+    pthread_mutex_lock+274
+    TimerWheel::arm(unsigned long, std::function<void ()>)+188
+    WorkerThread::run()+1080
+    start_thread+219
+, TimerWheel0]: 1493
+@cpu[
+    finish_task_switch+123
+, 
+    EventQueue::pop()+44
+    WorkerThread::run()+1080
+    start_thread+219
+, Worker12]: 842
+@cpu[
+, 
+    UserLogic::compute()+96
+    UserLogic::onEvent()+204
+    WorkerThread::run()+1080
+    start_thread+219
+, Worker3]: 611
+@cpu[
+    __softirqentry_text_start+215
+    irq_exit_rcu+165
+, 
+    0x7f3c8a4419a1
+    0x7f3c8a2f1177
+, Worker7]: 128
+@cpu[
+    smp_call_function_single+55
+, 
+, swapper/2]: 44

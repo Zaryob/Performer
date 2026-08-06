@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zaryob/performer/schema/wakeup_edges.schema.json",
+  "title": "Thread wakeup graph",
+  "description": "Directed edge list built from sched:sched_wakeup: which thread wakes which. Drawn as a force directed graph by the viewer; hub nodes are the interesting ones.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "edges"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "source": { "type": "string" },
+    "nodes": {
+      "description": "Optional node metadata. Threads referenced by an edge but missing here are still valid; the viewer falls back to meta/threads.json and then to the bare tid.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tid"],
+        "properties": {
+          "tid": { "type": "integer", "minimum": 0 },
+          "name": { "type": "string" },
+          "external": {
+            "description": "True when the tid does not belong to the target process (kernel threads, other processes).",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from_tid", "to_tid", "count"],
+        "properties": {
+          "from_tid": { "type": "integer", "minimum": 0 },
+          "to_tid": { "type": "integer", "minimum": 0 },
+          "count": { "type": "integer", "minimum": 0 },
+          "total_us": {
+            "description": "Summed wakeup to on-CPU latency for this edge, when runqlat data is correlated. Null when not measured.",
+            "type": ["number", "null"],
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "truncated": { "type": "boolean" },
+    "total_edges": { "type": "integer", "minimum": 0 }
+  }
+}

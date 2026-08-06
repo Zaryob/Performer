@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "run_id": "20260806T142530Z-baseline",
+  "label": "baseline",
+  "tags": ["before-timer-fix", "8-core"],
+  "notes": "Serbest metin. Viewer'da gosterilir.",
+  "started_at": "2026-08-06T14:25:30Z",
+  "duration_s": 60,
+  "profile": "standard",
+  "status": "partial",
+  "target": {
+    "pid": 205852,
+    "comm": "app",
+    "thread_count_start": 315,
+    "thread_count_end": 318
+  },
+  "probes": [
+    { "name": "offcpu", "status": "ok", "events_lost": 0, "warnings": [] },
+    { "name": "futex", "status": "partial", "events_lost": 12043, "warnings": ["map full"] }
+  ],
+  "tool_versions": {
+    "bpftrace": "0.20.2",
+    "kernel": "5.15.0-91-generic",
+    "performer": "0.1.0"
+  },
+  "quality": {
+    "frame_pointers_ok": true,
+    "unknown_frame_ratio": 0.04,
+    "estimated_overhead_pct": 6.2
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run_id": "20260806T142530Z-baseline",
+  "label": "baseline",
+  "started_at": "2026-08-06T14:25:30Z",
+  "duration_s": 60,
+  "profile": "light",
+  "status": "ok",
+  "target": {
+    "pid": 205852,
+    "comm": "app",
+    "thread_count_start": 315,
+    "thread_count_end": 315
+  },
+  "probes": [
+    {
+      "name": "oncpu",
+      "status": "failed"
+    }
+  ],
+  "tool_versions": {
+    "performer": "0.1.0"
+  },
+  "quality": {
+    "frame_pointers_ok": true,
+    "unknown_frame_ratio": 0.0,
+    "estimated_overhead_pct": 0.0
+  },
+  "_why_invalid": "status ok despite a failed probe"
+}
