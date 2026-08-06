@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zaryob/performer/schema/system.schema.json",
+  "title": "Host environment snapshot",
+  "description": "meta/system.json. Everything needed to judge whether two runs are comparable at all: same kernel, same core count, same cgroup limits.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kernel", "cpu_count"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "hostname": { "type": ["string", "null"] },
+    "kernel": { "type": "string", "minLength": 1 },
+    "arch": { "type": ["string", "null"] },
+    "distro": { "type": ["string", "null"] },
+    "cpu_count": { "type": "integer", "minimum": 1 },
+    "cpu_model": { "type": ["string", "null"] },
+    "boot_time": { "type": ["string", "null"] },
+    "mem_total_kb": { "type": ["integer", "null"], "minimum": 0 },
+    "clk_tck": { "type": ["integer", "null"], "minimum": 1 },
+    "perf_event_paranoid": { "type": ["integer", "null"] },
+    "kptr_restrict": { "type": ["integer", "null"] },
+    "ulimit_nofile": { "type": ["integer", "null"], "minimum": 0 },
+    "cgroup": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": ["string", "null"] },
+        "cpu_max": {
+          "description": "Raw cgroup v2 cpu.max value, e.g. '200000 100000' or 'max'.",
+          "type": ["string", "null"]
+        },
+        "memory_max": { "type": ["string", "null"] },
+        "cpuset_cpus": { "type": ["string", "null"] }
+      }
+    },
+    "load_avg": {
+      "type": ["array", "null"],
+      "items": { "type": "number" },
+      "minItems": 3,
+      "maxItems": 3
+    }
+  }
+}

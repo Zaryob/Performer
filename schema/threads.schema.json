@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zaryob/performer/schema/threads.schema.json",
+  "title": "Thread inventory",
+  "description": "meta/threads.json. Read from /proc/<pid>/task before and after the run, so it costs nothing and works even when every eBPF probe fails. Feeds the viewer's Threads table.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "threads"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "sampled_at_start": { "type": ["string", "null"] },
+    "sampled_at_end": { "type": ["string", "null"] },
+    "clk_tck": {
+      "description": "sysconf(_SC_CLK_TCK) on the target host, needed to interpret utime/stime.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "threads": {
+      "description": "Keyed by tid as a decimal string.",
+      "type": "object",
+      "patternProperties": {
+        "^[0-9]+$": { "$ref": "#/$defs/thread" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "thread": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 64 },
+        "first_seen": {
+          "description": "'start' when present in the pre-run snapshot, 'end' when the thread appeared during the run.",
+          "enum": ["start", "end"]
+        },
+        "exited": {
+          "description": "True when the thread was present at start and gone at end.",
+          "type": "boolean"
+        },
+        "start_schedstat": { "$ref": "#/$defs/schedstat" },
+        "end_schedstat": { "$ref": "#/$defs/schedstat" }
+      }
+    },
+    "schedstat": {
+      "description": "/proc/<pid>/task/<tid>/schedstat: time on CPU, time waiting on a runqueue, timeslices run. Null when the file was unreadable (CONFIG_SCHEDSTATS off).",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["run_ns", "wait_ns", "timeslices"],
+      "properties": {
+        "run_ns": { "type": "integer", "minimum": 0 },
+        "wait_ns": { "type": "integer", "minimum": 0 },
+        "timeslices": { "type": "integer", "minimum": 0 },
+        "voluntary_ctxt_switches": { "type": "integer", "minimum": 0 },
+        "nonvoluntary_ctxt_switches": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zaryob/performer/schema/manifest.schema.json",
+  "title": "Performer run bundle manifest",
+  "description": "Describes a single measurement run. Written by the collector, read by the viewer. This file is the contract between the two halves of the project.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "label",
+    "started_at",
+    "duration_s",
+    "profile",
+    "status",
+    "target",
+    "probes",
+    "tool_versions",
+    "quality"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Bundle format version. Bumped on any breaking change; viewers must refuse unknown majors.",
+      "const": 1
+    },
+    "run_id": {
+      "description": "Unique run identifier: <UTC compact timestamp>-<label>. Also the name of the run directory inside the archive.",
+      "type": "string",
+      "pattern": "^[0-9]{8}T[0-9]{6}Z-[A-Za-z0-9._-]{1,64}$"
+    },
+    "label": {
+      "description": "Human-chosen short name. Ends up in file names, so the character set is restricted.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,64}$"
+    },
+    "tags": {
+      "description": "Free-form tags used by the viewer for grouping and filtering runs.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "maxItems": 32
+    },
+    "notes": {
+      "description": "Free text shown in the viewer. Not interpreted.",
+      "type": "string",
+      "maxLength": 8192
+    },
+    "started_at": {
+      "description": "UTC start of the measurement window (RFC 3339, Z suffix mandatory).",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "ended_at": {
+      "description": "UTC end of the measurement window. Absent if the collector was killed before it could finish writing.",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "duration_s": {
+      "description": "Requested measurement duration in seconds.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 86400
+    },
+    "actual_duration_s": {
+      "description": "Wall clock time actually spent collecting. Differs from duration_s when the target died or --until-exit was used.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 86400
+    },
+    "profile": {
+      "description": "Name of the collection profile (collector/profiles/<name>.yaml). Whitelisted; never a path.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$"
+    },
+    "status": {
+      "description": "Run level outcome. 'partial' means the bundle is readable but incomplete (probe failure, target died, signal not delivered).",
+      "enum": ["ok", "partial", "failed"]
+    },
+    "target_died_at": {
+      "description": "Set when the /proc watcher observed the target process disappear mid-run. Implies status != ok.",
+      "type": ["string", "null"],
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "target": { "$ref": "#/$defs/target" },
+    "probes": {
+      "description": "One entry per probe the profile asked for, including the ones that failed. Probes are never dropped silently.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/probe" }
+    },
+    "tool_versions": { "$ref": "#/$defs/tool_versions" },
+    "quality": { "$ref": "#/$defs/quality" },
+    "files": {
+      "description": "Inventory of the payload files in the bundle. Lets the viewer know which optional artifacts exist without probing, and lets inspect verify integrity.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/file_entry" }
+    },
+    "warnings": {
+      "description": "Run level warnings that do not belong to a single probe.",
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pid", "comm", "thread_count_start", "thread_count_end"],
+      "properties": {
+        "pid": { "type": "integer", "minimum": 1 },
+        "comm": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "cmdline": {
+          "description": "argv of the target, split on NUL as read from /proc/<pid>/cmdline.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "exe": {
+          "description": "Resolved /proc/<pid>/exe. Needed to attach uprobes and to resolve symbols later.",
+          "type": ["string", "null"]
+        },
+        "thread_count_start": { "type": "integer", "minimum": 0 },
+        "thread_count_end": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "status"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_]{0,31}$" },
+        "status": {
+          "description": "ok = ran and produced output; partial = ran but lost events or was killed hard; failed = smoke test or startup failed; skipped = not requested or disabled by preflight.",
+          "enum": ["ok", "partial", "failed", "skipped"]
+        },
+        "events_lost": {
+          "description": "Events dropped by the kernel or by a full bpftrace map. Non-zero means the numbers are a lower bound.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "warnings": { "type": "array", "items": { "type": "string" } },
+        "duration_s": { "type": "number", "minimum": 0 },
+        "exit_reason": {
+          "description": "How the probe process ended. 'sigkill' means bpftrace never got to dump its maps for that probe.",
+          "enum": ["exited", "sigint", "sigterm", "sigkill", "startup_error", "not_started"]
+        },
+        "exit_code": { "type": ["integer", "null"] },
+        "thresholds": {
+          "description": "Effective thresholds the probe ran with, e.g. {\"min_us\": 100}. Recorded because they change what the data means.",
+          "type": "object",
+          "additionalProperties": { "type": ["number", "string", "boolean"] }
+        },
+        "outputs": {
+          "description": "Bundle relative paths produced by this probe.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/relpath" }
+        }
+      }
+    },
+    "tool_versions": {
+      "type": "object",
+      "required": ["oxfscope"],
+      "properties": {
+        "oxfscope": { "type": "string", "minLength": 1 },
+        "bpftrace": { "type": ["string", "null"] },
+        "kernel": { "type": ["string", "null"] },
+        "python": { "type": ["string", "null"] },
+        "distro": { "type": ["string", "null"] }
+      },
+      "additionalProperties": { "type": ["string", "null"] }
+    },
+    "quality": {
+      "description": "Trust metadata. The viewer red flags a run from this block alone, so it is mandatory.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frame_pointers_ok", "unknown_frame_ratio", "estimated_overhead_pct"],
+      "properties": {
+        "frame_pointers_ok": {
+          "description": "False when the preflight stack sample was dominated by [unknown] frames, i.e. the target was built without -fno-omit-frame-pointer.",
+          "type": "boolean"
+        },
+        "unknown_frame_ratio": {
+          "description": "Fraction of sampled frames that could not be symbolised. Above 0.30 the flame graphs are misleading.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "estimated_overhead_pct": {
+          "description": "Rough target CPU overhead attributed to the measurement, from utime+stime sampled before and after the run.",
+          "type": "number",
+          "minimum": 0
+        },
+        "unknown_frame_samples": { "type": "integer", "minimum": 0 },
+        "total_frame_samples": { "type": "integer", "minimum": 0 },
+        "overhead": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu_pct_before": { "type": "number", "minimum": 0 },
+            "cpu_pct_during": { "type": "number", "minimum": 0 },
+            "cpu_pct_after": { "type": "number", "minimum": 0 },
+            "sample_window_s": { "type": "number", "minimum": 0 }
+          }
+        },
+        "ignore_quality": {
+          "description": "True when the operator forced collection past a failed frame pointer check with --ignore-quality.",
+          "type": "boolean"
+        },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "file_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes"],
+      "properties": {
+        "path": { "$ref": "#/$defs/relpath" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "rows": {
+          "description": "Line/record count where meaningful (folded stacks, CSV series).",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "relpath": {
+      "description": "Bundle relative path. Forward slashes, no leading slash, no '..' component.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[A-Za-z0-9._][A-Za-z0-9._/-]*$"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run_id": "20260806T142530Z-baseline",
+  "label": "baseline",
+  "started_at": "2026-08-06T14:25:30Z",
+  "duration_s": 60,
+  "profile": "light",
+  "status": "ok",
+  "target": {
+    "pid": 205852,
+    "comm": "Hisar_Seri_Uret",
+    "thread_count_start": 315,
+    "thread_count_end": 315
+  },
+  "probes": [
+    {
+      "name": "oncpu",
+      "status": "ok"
+    }
+  ],
+  "tool_versions": {
+    "oxfscope": "0.1.0"
+  },
+  "quality": {
+    "frame_pointers_ok": true,
+    "unknown_frame_ratio": 1.4,
+    "estimated_overhead_pct": 0.0
+  },
+  "_why_invalid": "unknown_frame_ratio must be 0..1"
+}

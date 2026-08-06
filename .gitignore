@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Collected and synthetic run bundles are outputs, never sources.
+/runs/
+*.tgz
+
+# Viewer (M3) -- note that viewer/dist IS committed, per the spec.
+viewer/node_modules/
+viewer/.vite/

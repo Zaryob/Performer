@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zaryob/performer/schema/target.schema.json",
+  "title": "Target process snapshot",
+  "description": "meta/target.json. The manifest carries a summary of this; the full version keeps the before/after /proc state used to compute the overhead estimate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "pid", "comm", "thread_count_start", "thread_count_end"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "pid": { "type": "integer", "minimum": 1 },
+    "comm": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "cmdline": { "type": "array", "items": { "type": "string" } },
+    "exe": { "type": ["string", "null"] },
+    "cwd": { "type": ["string", "null"] },
+    "start_time_ticks": {
+      "description": "Field 22 of /proc/<pid>/stat. Together with pid it identifies the process instance, so a recycled pid cannot be mistaken for the same target.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "thread_count_start": { "type": "integer", "minimum": 0 },
+    "thread_count_end": { "type": "integer", "minimum": 0 },
+    "died_during_run": { "type": "boolean" },
+    "cpu_before": { "$ref": "#/$defs/cpu_sample" },
+    "cpu_after": { "$ref": "#/$defs/cpu_sample" },
+    "maps_summary": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "libc": { "type": ["string", "null"] },
+        "main_exe_base": { "type": ["string", "null"] }
+      }
+    }
+  },
+  "$defs": {
+    "cpu_sample": {
+      "description": "utime+stime sampled over a short window either side of the run. The difference in CPU percentage is the overhead estimate.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["window_s", "utime_ticks", "stime_ticks"],
+      "properties": {
+        "window_s": { "type": "number", "minimum": 0 },
+        "utime_ticks": { "type": "integer", "minimum": 0 },
+        "stime_ticks": { "type": "integer", "minimum": 0 },
+        "cpu_pct": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}
