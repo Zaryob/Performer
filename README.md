@@ -30,11 +30,11 @@ lab box, so it uses **nothing outside the Python standard library** — no pip,
 no virtualenv, no network. The viewer is a static bundle that works from
 `file://`, so it needs no server and parses bundles entirely client-side.
 
-## Status: M5 complete
+## Status: complete through M6
 
 M0 fixed the contract, M1 made one probe real, M2 completed the collector, M3
-made the data readable, M4 made two runs comparable, and M5 reaches a
-conclusion: it names the bottleneck, or says plainly that there is not one.
+made the data readable, M4 made two runs comparable, M5 reached a conclusion,
+and M6 closes the loop: measure and look, in one place.
 
 | Milestone | Scope | State |
 |---|---|---|
@@ -44,7 +44,7 @@ conclusion: it names the bottleneck, or says plainly that there is not one.
 | **M3** | Viewer: bundle loading, Overview, Flame (filter + search), Threads | **done** |
 | **M4** | Diff screen, differential flame graph, normalisation, `performer diff` | **done** |
 | **M5** | Locks screen, wakeup graph, automatic verdict sentence | **done** |
-| M6 | localhost daemon, click-to-collect | todo |
+| **M6** | localhost daemon, token auth, click-to-collect | **done** |
 
 `daemon` is registered as a command today and exits with code 3 and an explicit
 "not implemented in this milestone" message. It never pretends to have worked.
@@ -198,8 +198,8 @@ an error-level flag exit 1, which is what a future CI gate would use.
 | `validate <bundle>...` | Schema + cross-field validation only, exit 1 on failure. `--verify-hashes` |
 | `diff A B` | Compare two runs: movers, new and vanished call paths, thread deltas. `--kind`, `--raw`, `--per-thread`, `--thread`, `--min-share`, `--top`, `--json` |
 | `fake-run` | Write a synthetic bundle. `--load steady\|heavy`, `--degraded`, `--bad-frame-pointers`, `--threads`, `--seed`, `--no-pack` |
+| `daemon` | Serve the viewer and a localhost API for starting measurements. `--port`, `--out`, `--profile` (repeatable whitelist), `--token`, `--no-viewer`, `--open` |
 | `schema [name]` | Show or print the schemas this build enforces |
-| `daemon` | Registered, not implemented (exit 3) |
 
 Bundles are accepted as either a `.tgz` or an unpacked run directory.
 
@@ -213,6 +213,11 @@ That is the entire deployment. `dist/index.html` is one self-contained file —
 no server, no toolchain, no network — and bundles are read in the browser
 through the file picker or by dropping them on the page. Nothing is uploaded,
 because there is nowhere to upload to.
+
+On the *target* machine there is a second mode, described under
+[Collecting from the browser](#collecting-from-the-browser) below: the same
+file, served by `performer daemon`, with a **New measurement** button that the
+`file://` copy does not have.
 
 | screen | what it answers |
 |---|---|
@@ -273,6 +278,49 @@ together. That costs a second aggregation, and it is the difference between a
 finding and a line of code: the two separate maps cannot be joined afterwards,
 because knowing the hottest address and, separately, the hottest call path does
 not establish that they are the same contention.
+
+## Collecting from the browser
+
+```console
+# performer daemon --out /var/tmp/runs
+performer daemon on http://127.0.0.1:7878/
+  output directory: /var/tmp/runs
+  profiles:         deep, light, standard
+
+  token: 8Qw1v...
+  open:  http://127.0.0.1:7878/?token=8Qw1v...
+```
+
+Open that link on the target machine and the viewer gains a **New
+measurement** button: pick a process from a list that shows thread counts,
+pick a profile, watch the collector's output stream, and the finished bundle
+opens in the same page. No download folder, no second tool, no `scp`.
+
+The button is absent — not disabled — when the page was opened as a file,
+because `file://` forbids `fetch` and an API call could never have worked
+there anyway.
+
+This is the only part of Performer that listens on a socket, and it runs as
+root on a machine somebody cares about. Its design is therefore mostly a list
+of refusals:
+
+| | |
+|---|---|
+| **Loopback only** | Binds `127.0.0.1`, and rejects any request whose `Host` header is not a loopback name — that is the DNS-rebinding defence, and the header is the only thing distinguishing a rebound request from a real one. |
+| **Bearer token** | Printed once at startup, compared with `compare_digest`, never in a cookie. The page takes it out of the URL on load so it does not linger in history or a screenshot. |
+| **No CORS headers, ever** | Silence is how "another origin may not read this" is said. Cross-origin `POST`s are refused outright. |
+| **Profiles by name** | Chosen from a whitelist; `--profile light` restricts a box to the cheap tier. A path never comes from a request. |
+| **Nothing reaches a shell** | The collector runs bpftrace through `subprocess` without `shell=True`, and labels, tags and pids are validated at the edge anyway — "it happens to be safe two layers down" is not a property that survives a refactor. |
+| **Paths are checked twice** | A run id is matched against `RUN_ID_RE` *and* the resolved path is confirmed to be inside the output directory, so loosening the pattern later cannot silently become a file disclosure. |
+| **One job at a time** | Two concurrent eBPF attachments is the way to make an overhead estimate meaningless. |
+
+Cancelling a run is not a kill: it sets the same event Ctrl-C does, so the
+probes are still SIGINTed in order and the bundle is still written. A
+cancelled run is a short run, not a lost one.
+
+`tests/test_daemon.py` drives a real server on a real socket for each of
+these, including the four the milestone names — shell metacharacters, path
+traversal, invalid pid, missing token.
 
 ## Comparing two runs
 

@@ -27,6 +27,18 @@ def run_cli(*argv):
     return code, out.getvalue(), err.getvalue()
 
 
+def run_help(*argv):
+    """`--help` exits through SystemExit, which argparse owns and we do not."""
+    out, err = io.StringIO(), io.StringIO()
+    code = 0
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            main([*argv, "--help"])
+        except SystemExit as exc:
+            code = int(exc.code or 0)
+    return code, out.getvalue(), err.getvalue()
+
+
 class CliTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -108,12 +120,21 @@ class CliTests(unittest.TestCase):
         self.assertIn("FAIL", out)
         self.assertIn("unknown_frame_ratio", out)
 
-    def test_unimplemented_commands_exit_three(self):
-        for command in ("daemon",):
+    def test_every_advertised_command_is_implemented(self):
+        # There used to be stubs here exiting 3 with "not implemented in this
+        # milestone". Every command is real now, so the stub machinery is
+        # gone -- and this is what stops it coming back as an empty branch
+        # nothing can reach.
+        code, out, _ = run_help()
+        self.assertEqual(code, 0)
+        self.assertNotIn("not implemented", out)
+        for command in ("collect", "preflight", "inspect", "validate",
+                        "fake-run", "diff", "daemon", "schema"):
             with self.subTest(command=command):
-                code, _, err = run_cli(command)
-                self.assertEqual(code, 3)
-                self.assertIn("not implemented", err)
+                self.assertIn(command, out)
+                code, help_text, _ = run_help(command)
+                self.assertEqual(code, 0)
+                self.assertNotIn("not implemented", help_text)
 
     def test_schema_command_lists_the_contract(self):
         code, out, _ = run_cli("schema")

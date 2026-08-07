@@ -51,6 +51,7 @@ another screen. The thresholds live in `src/quality.ts` and mirror
 | Locks | contended mutexes ranked by wait time, each attributed to the code that takes it |
 | Wakeups | force-directed wakeup graph plus the waker ranking |
 | Diff | two runs joined on their call paths: differential flame graph, biggest movers, the paths that appeared and the paths that vanished |
+| Collect | only when a daemon is serving this page: pick a process, pick a profile, watch the run, open the result |
 | Timeline | M5 |
 
 The Overview leads with a **verdict**: one sentence naming the bottleneck, the
@@ -75,10 +76,13 @@ src/
   bundle/folded.ts    folded stacks -> flame tree, filters, search
   bundle/diff.ts      two runs -> per-path deltas, differential tree, colour
   analysis.ts         lock ranking, wakeup hubs, and the verdict
+  api.ts              the daemon, when one is serving this page
   quality.ts          the thresholds, mirroring the collector
   components/         FlameGraph (canvas), shared UI
-  screens/            Runs, Overview, Flame, Threads, Locks, Wakeups, Diff
+  screens/            Runs, Overview, Flame, Threads, Locks, Wakeups, Diff,
+                      Collect
 verify.mjs            drives a real browser over file:// and times the render
+verify-daemon.mjs     drives "New measurement" against a running daemon
 ```
 
 `dist/` is committed so the analysis machine needs no toolchain. Rebuild it

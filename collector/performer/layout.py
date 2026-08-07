@@ -151,6 +151,32 @@ def schema_path(name: str) -> Path:
     return schema_dir() / name
 
 
+def viewer_index() -> Optional[Path]:
+    """Locate the built viewer, if this checkout has one.
+
+    The daemon serves it, which is not a convenience: ``file://`` forbids
+    ``fetch``, so a viewer opened by double click cannot call an API at all.
+    Being served is what makes "collect a new run from the browser" possible,
+    and it is the only difference between the two modes.
+    """
+    override = os.environ.get("PERFORMER_VIEWER_DIST")
+    if override:
+        candidate = Path(override)
+        if candidate.is_dir():
+            candidate = candidate / "index.html"
+        return candidate if candidate.is_file() else None
+    here = Path(__file__).resolve()
+    candidates: Sequence[Path] = (
+        here.parent.parent.parent / "viewer" / "dist" / "index.html",
+        here.parent.parent / "viewer" / "dist" / "index.html",
+        here.parent / "viewer" / "index.html",
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def schema_for(bundle_relpath: str, kind: Optional[str] = None) -> Optional[str]:
     """Return the schema file name that governs ``bundle_relpath``, if any."""
     if bundle_relpath in SCHEMA_FOR_PATH:

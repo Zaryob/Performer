@@ -4,7 +4,6 @@ Exit codes:
     0  success
     1  failure (unreadable bundle, failed validation, strict flag tripped)
     2  usage error (argparse)
-    3  command exists but is not implemented in this milestone
 """
 
 from __future__ import annotations
@@ -23,11 +22,6 @@ from .report import LEVEL_ERROR, build_summary, render, summary_json
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
-EXIT_NOT_IMPLEMENTED = 3
-
-_NOT_IMPLEMENTED = {
-    "daemon": "M6 -- the localhost API is not implemented yet",
-}
 
 
 PROG = "performer"
@@ -260,14 +254,54 @@ def _build_parser() -> argparse.ArgumentParser:
     diff.add_argument("--json", action="store_true")
     diff.set_defaults(func=_cmd_diff)
 
+    daemon = sub.add_parser(
+        "daemon",
+        help="serve the viewer and a localhost API for starting measurements",
+        description=(
+            "Binds 127.0.0.1 only, prints a bearer token once, and serves the "
+            "built viewer so that a measurement can be started from the "
+            "browser. Every API request needs the token; profiles are chosen "
+            "by name from a whitelist; nothing from a request reaches a shell."
+        ),
+    )
+    daemon.add_argument("--port", type=int, default=7878)
+    daemon.add_argument(
+        "--out", type=Path, default=Path("./runs"), help="where bundles are written"
+    )
+    daemon.add_argument(
+        "--profile",
+        action="append",
+        dest="allowed_profiles",
+        metavar="NAME",
+        help=(
+            "restrict the API to this profile (repeatable). "
+            "Default: every installed profile"
+        ),
+    )
+    daemon.add_argument(
+        "--token",
+        default=None,
+        help=(
+            "use this token instead of generating one. Intended for scripts; "
+            "a generated token is better than one that ends up in a shell history"
+        ),
+    )
+    daemon.add_argument(
+        "--no-viewer",
+        action="store_true",
+        help="serve the API only, without the built viewer",
+    )
+    daemon.add_argument(
+        "--open", action="store_true", dest="open_browser", help="open a browser"
+    )
+    daemon.add_argument(
+        "--bpftrace", default=None, help="path to the bpftrace binary to use"
+    )
+    daemon.set_defaults(func=_cmd_daemon)
+
     schema = sub.add_parser("schema", help="show the bundle schemas this build enforces")
     schema.add_argument("name", nargs="?", help="schema file to print, e.g. manifest")
     schema.set_defaults(func=_cmd_schema)
-
-    for name, reason in _NOT_IMPLEMENTED.items():
-        stub = sub.add_parser(name, help=f"not implemented yet ({reason.split(' -- ')[0]})")
-        stub.add_argument("args", nargs=argparse.REMAINDER)
-        stub.set_defaults(func=_cmd_not_implemented, _reason=reason, _name=name)
 
     return parser
 
@@ -408,6 +442,30 @@ def _cmd_diff(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_daemon(args: argparse.Namespace) -> int:
+    from . import daemon as daemon_mod
+
+    allowed = tuple(args.allowed_profiles) if args.allowed_profiles else None
+    if allowed:
+        unknown = [name for name in allowed if name not in profiles.available()]
+        if unknown:
+            raise PerformerError(
+                f"unknown profile(s): {', '.join(unknown)}; available: "
+                + ", ".join(sorted(profiles.available()))
+            )
+    return daemon_mod.serve(
+        daemon_mod.DaemonOptions(
+            out_dir=args.out,
+            port=args.port,
+            token=args.token,
+            allowed_profiles=allowed,
+            bpftrace=args.bpftrace,
+            serve_viewer=not args.no_viewer,
+            open_browser=args.open_browser,
+        )
+    )
+
+
 def _cmd_schema(args: argparse.Namespace) -> int:
     directory = layout.schema_dir()
     if args.name:
@@ -425,40 +483,11 @@ def _cmd_schema(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _cmd_not_implemented(args: argparse.Namespace) -> int:
-    print(
-        f"{PROG} {args._name}: not implemented yet ({args._reason}).",
-        file=sys.stderr,
-    )
-    print("See README.md for the milestone plan.", file=sys.stderr)
-    return EXIT_NOT_IMPLEMENTED
-
-
 # --------------------------------------------------------------------------
-
-
-def _stub_command(argv: Sequence[str]) -> Optional[str]:
-    """Detect a not-yet-implemented command before argparse sees its flags.
-
-    ``collect --pid 205852 ...`` must answer "not implemented yet", not
-    "unrecognized arguments: --pid": the operator's mistake is the milestone,
-    not the syntax.  ``--help`` still falls through to argparse.
-    """
-    if any(flag in argv for flag in ("-h", "--help")):
-        return None
-    for token in argv:
-        if not token.startswith("-"):
-            return token if token in _NOT_IMPLEMENTED else None
-    return None
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     raw = list(argv) if argv is not None else sys.argv[1:]
-    stub = _stub_command(raw)
-    if stub is not None:
-        namespace = argparse.Namespace(_name=stub, _reason=_NOT_IMPLEMENTED[stub])
-        return _cmd_not_implemented(namespace)
-
     parser = _build_parser()
     args = parser.parse_args(raw)
     if getattr(args, "func", None) is None:

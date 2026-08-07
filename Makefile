@@ -3,7 +3,7 @@ PYTHON ?= python3
 CLI    := ./collector/bin/performer
 RUNS   ?= ./runs
 
-.PHONY: help test check target fake pair diff profiles inspect viewer clean
+.PHONY: help test check target fake pair diff profiles inspect viewer serve clean
 
 help:
 	@echo "make test     run the test suite (no dependencies)"
@@ -14,6 +14,7 @@ help:
 	@echo "make diff     write the pair and compare them"
 	@echo "make inspect  inspect every bundle in $(RUNS)"
 	@echo "make viewer   build viewer/dist/index.html (needs npm)"
+	@echo "make serve    run the daemon: viewer plus a localhost collect API"
 	@echo "make clean    remove $(RUNS) and __pycache__"
 
 test:
@@ -49,6 +50,11 @@ inspect:
 
 viewer:
 	cd viewer && npm install --no-audit --no-fund && npm run build && npm test
+
+# Needs root to actually collect; without it the API answers can_collect:false
+# and the browser says so before anything is disturbed.
+serve:
+	$(CLI) daemon --out $(RUNS)
 
 clean:
 	rm -rf $(RUNS)
