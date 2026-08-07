@@ -47,6 +47,10 @@ STACK_OFFWAKE = f"{DIR_STACKS}/offwake.folded"
 HIST_RUNQLAT = f"{DIR_HIST}/runqlat.json"
 HIST_SYSCALL_LATENCY = f"{DIR_HIST}/syscall_latency.json"
 HIST_FUTEX_BY_ADDR = f"{DIR_HIST}/futex_by_addr.json"
+#: Lock address *and* the call path that waited on it, in one table.  The two
+#: separate aggregations cannot be joined after the fact, and a hex address on
+#: its own is not something anybody can act on.
+HIST_FUTEX_SITES = f"{DIR_HIST}/futex_sites.json"
 HIST_FUTEX_DURATION = f"{DIR_HIST}/futex_duration.json"
 HIST_OFFCPU_DURATION = f"{DIR_HIST}/offcpu_duration.json"
 HIST_OFFCPU_BY_STATE = f"{DIR_HIST}/offcpu_by_state.json"

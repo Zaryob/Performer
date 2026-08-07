@@ -30,11 +30,11 @@ lab box, so it uses **nothing outside the Python standard library** — no pip,
 no virtualenv, no network. The viewer is a static bundle that works from
 `file://`, so it needs no server and parses bundles entirely client-side.
 
-## Status: M4 complete
+## Status: M5 complete
 
 M0 fixed the contract, M1 made one probe real, M2 completed the collector, M3
-made the data readable, and M4 makes two runs comparable — which is the point,
-since nobody profiles a process once.
+made the data readable, M4 made two runs comparable, and M5 reaches a
+conclusion: it names the bottleneck, or says plainly that there is not one.
 
 | Milestone | Scope | State |
 |---|---|---|
@@ -43,7 +43,7 @@ since nobody profiles a process once.
 | **M2** | Full probe set, YAML profiles, histogram/table parsers, partial bundles | **done** |
 | **M3** | Viewer: bundle loading, Overview, Flame (filter + search), Threads | **done** |
 | **M4** | Diff screen, differential flame graph, normalisation, `performer diff` | **done** |
-| M5 | Locks table, wakeup graph, automatic verdict sentence | todo |
+| **M5** | Locks screen, wakeup graph, automatic verdict sentence | **done** |
 | M6 | localhost daemon, click-to-collect | todo |
 
 `daemon` is registered as a command today and exits with code 3 and an explicit
@@ -220,6 +220,8 @@ because there is nowhere to upload to.
 | **Overview** | what this run measured, which probes delivered, and the quality block |
 | **Flame** | where the time goes — on-CPU, off-CPU or futex, with search, zoom, icicle mode, a thread filter and an idle-thread cutoff |
 | **Threads** | every thread's CPU and runqueue time, sortable — read from `/proc`, so it survives total probe failure |
+| **Locks** | which mutex is costing you, ranked, and — the part that matters — which code takes it |
+| **Wakeups** | who wakes whom, as a graph, because a thread that wakes three hundred others is invisible in every other view |
 | **Diff** | what changed between two runs: a differential flame graph, the biggest movers, and the call paths that appeared or vanished |
 
 Two decisions the 315-thread case forced. The graph is drawn on a **canvas**,
@@ -233,6 +235,44 @@ reason to ask.
 A run whose stacks could not be resolved gets a banner **on the graph itself**,
 not just a flag elsewhere: a flame graph over `[unknown]` frames looks exactly
 like a real one, which is what makes it dangerous.
+
+## The verdict
+
+The Overview opens with a sentence naming the bottleneck:
+
+> **A single mutex is the bottleneck: the one taken by `TimerWheel::arm()`.**
+> · 83% of all futex wait time is on one address (`0x7f3c8a001240`)
+> · 7,182 s of waiting across 1,795,500 waits — 38% of each thread's time, on average
+> · 86% of that address's wait comes from `TimerWheel::arm()`
+> → Locks — the call paths that take it are listed under that address.
+
+Everything else in this tool presents evidence and lets you weigh it, which is
+the right default. It is also not enough: the person who most needs the tool is
+the one who does not already know that a 90% share of futex time at one address
+means a single contended mutex. Three rules keep the sentence from becoming a
+liability:
+
+* **A verdict carries its evidence.** Never the claim alone — always the share,
+  the address, the call path, and the screen that shows the working. A
+  conclusion you cannot falsify on sight is worse than none.
+* **"Nothing dominates" is a valid answer**, presented just as prominently. On a
+  real profile it is the more common one, and burying it would push the reader
+  into inventing a finding.
+* **Unusable data produces no verdict at all.** A run whose stacks did not
+  resolve still yields a confident-looking ranking, and that is precisely when
+  a machine-written sentence does the most damage.
+
+The thresholds live in `viewer/src/analysis.ts` and are deliberately high. The
+cost of a false positive is someone spending a week on the wrong lock; the cost
+of a false negative is that they read the screens themselves, which they were
+going to do anyway.
+
+**A lock address is not an answer.** `0x7f3c8a001240` is an identity within one
+run and nothing more, so `futex.bt` keys its map on the address *and* the stack
+together. That costs a second aggregation, and it is the difference between a
+finding and a line of code: the two separate maps cannot be joined afterwards,
+because knowing the hottest address and, separately, the hottest call path does
+not establish that they are the same contention.
 
 ## Comparing two runs
 

@@ -111,6 +111,16 @@ class LoadScenario:
 
 LOAD_SCENARIOS: Dict[str, LoadScenario] = {
     "steady": LoadScenario(description="the reference workload"),
+    # The negative control. A tool that names a bottleneck is only worth
+    # having if it also declines to when there is not one, and that is a
+    # property nothing else in the fixture set exercises: every other scenario
+    # has the same deliberately hot mutex in it. Only the lock contention is
+    # damped here -- the run still has plenty going on, which is the point:
+    # "no *lock* to blame" has to survive a profile that is otherwise busy.
+    "spread": LoadScenario(
+        description="lock cost spread across many addresses; no one mutex to blame",
+        scale=(("TimerWheel::arm", 0.35), ("TimerWheel::cancel", 0.5)),
+    ),
     "heavy": LoadScenario(
         description="the same process under roughly twice the message rate",
         scale=(
@@ -539,11 +549,27 @@ def generate(
     addresses = [HOT_FUTEX_ADDR] + [
         HOT_FUTEX_ADDR + rng.randint(0x100, 0x80000) for _ in range(11)
     ]
+    # Futex wait is summed over threads, so a bottleneck's total is measured
+    # against the thread-seconds the run had available, not against the wall
+    # clock.  Scaling it that way is not decoration: a fixed 6.8 s of wait
+    # spread over 315 threads for a minute is 0.2% of each thread's time --
+    # noise, not contention -- and a synthetic "hot lock" that is really noise
+    # would let a bad threshold in the analysis pass its own test.
+    thread_seconds = max(1.0, thread_count * float(duration_s))
+    hot_share = {"heavy": 0.55, "spread": 0.02}.get(load, 0.38)
     for index, address in enumerate(addresses):
-        # One address dominates on purpose: that is the TimerWheel lock
-        # the whole project exists to find.
-        total_us = 6_820_000 if index == 0 else rng.randint(4_000, 210_000)
-        count = 41_920 if index == 0 else rng.randint(200, 9_000)
+        # One address dominates on purpose: that is the TimerWheel lock the
+        # whole project exists to find -- except under `spread`, where nothing
+        # dominates and the tool has to say so.
+        if index == 0:
+            total_us = int(thread_seconds * hot_share * 1e6)
+            # ~4 ms of waiting per acquisition, which is what a 50 us critical
+            # section looks like once a few hundred threads are queued on it.
+            count = max(1, int(total_us / 4_000))
+        else:
+            spread = 0.015 if load == "spread" else 0.012
+            total_us = int(thread_seconds * rng.uniform(0.0004, spread) * 1e6)
+            count = rng.randint(200, 9_000)
         futex_rows.append(
             [
                 f"0x{address:x}",
@@ -554,6 +580,59 @@ def generate(
             ]
         )
     futex_rows.sort(key=lambda row: row[1], reverse=True)
+
+    # The same wait time, split by the call path that waited.  The hot address
+    # is taken from two places and one of them is responsible for most of it,
+    # which is the shape a real single-lock bottleneck has -- and the reason
+    # the probe pays for the combined map at all.
+    site_rows: List[List[Any]] = []
+    for index, address in enumerate(addresses):
+        if index == 0:
+            splits = ((_FUTEX_STACKS[0][0], 0.86), (_FUTEX_STACKS[1][0], 0.14))
+        else:
+            splits = ((_FUTEX_STACKS[2][0], 1.0),)
+        total_us = futex_rows[
+            next(i for i, row in enumerate(futex_rows) if row[0] == f"0x{address:x}")
+        ][1]
+        calls = futex_rows[
+            next(i for i, row in enumerate(futex_rows) if row[0] == f"0x{address:x}")
+        ][2]
+        for stack, share in splits:
+            site_us = int(total_us * share)
+            site_calls = max(1, int(calls * share))
+            site_rows.append(
+                [
+                    f"0x{address:x}",
+                    # The thread name frame belongs to the flame graph, not to
+                    # a lock attribution: which thread took it is a different
+                    # question from which code did.
+                    stack.split(";", 1)[1],
+                    site_us,
+                    site_calls,
+                    round(site_us / site_calls, 2),
+                ]
+            )
+    site_rows.sort(key=lambda row: row[2], reverse=True)
+    builder.add_json(
+        layout.HIST_FUTEX_SITES,
+        {
+            "schema_version": layout.SCHEMA_VERSION,
+            "kind": "table",
+            "name": "futex_sites",
+            "source": "futex.bt:@futex_site",
+            "columns": [
+                {"id": "addr", "label": "uaddr", "type": "hex", "unit": "none"},
+                {"id": "stack", "label": "call path", "type": "stack"},
+                {"id": "total_us", "label": "total wait", "type": "int", "unit": "us", "sort": "desc"},
+                {"id": "calls", "label": "calls", "type": "int", "unit": "count"},
+                {"id": "avg_us", "label": "avg wait", "type": "float", "unit": "us"},
+            ],
+            "rows": site_rows,
+            "truncated": False,
+            "total_rows": len(site_rows),
+        },
+    )
+
     builder.add_json(
         layout.HIST_FUTEX_BY_ADDR,
         {
@@ -692,7 +771,11 @@ def generate(
         ProbeResult(
             name="futex",
             status="ok",
-            outputs=[layout.STACK_FUTEX, layout.HIST_FUTEX_BY_ADDR],
+            outputs=[
+                layout.STACK_FUTEX,
+                layout.HIST_FUTEX_BY_ADDR,
+                layout.HIST_FUTEX_SITES,
+            ],
             duration_s=float(duration_s),
             exit_reason="sigint",
             exit_code=0,

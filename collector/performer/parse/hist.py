@@ -35,7 +35,11 @@ _HEADER_RE = re.compile(r"^@([A-Za-z_][A-Za-z0-9_]*)?(?:\[(.*)\])?:\s*(.*)$")
 #: map, whose key spans several lines.  Those belong to parse/stacks.py; this
 #: parser has to recognise and skip them, not complain about them, because a
 #: single probe prints both shapes into one stream.
-_STACK_MAP_START_RE = re.compile(r"^@[A-Za-z_][A-Za-z0-9_]*\[\s*$")
+#:
+#: The key may begin with scalars before the stack -- ``@futex_site[140737,``
+#: joins a lock address to the call path that waited on it -- so what marks
+#: the line is the *absence* of a closing ``]:``, not an empty key.
+_STACK_MAP_START_RE = re.compile(r"^@[A-Za-z_][A-Za-z0-9_]*\[(?!.*\]:).*$")
 _STACK_MAP_END_RE = re.compile(r"\]:\s*\S")
 
 #: ``[2, 4)  8 |@@@|`` -- the bracket kinds vary between hist and lhist.

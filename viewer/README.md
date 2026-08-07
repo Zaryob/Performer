@@ -48,8 +48,16 @@ another screen. The thresholds live in `src/quality.ts` and mirror
 | Overview | run summary, probe table, quality block, artifacts |
 | Flame | on-CPU / off-CPU / futex, search, zoom, icicle, thread filter, hide idle |
 | Threads | every thread with CPU and runqueue time, sortable; delta columns against a baseline run |
+| Locks | contended mutexes ranked by wait time, each attributed to the code that takes it |
+| Wakeups | force-directed wakeup graph plus the waker ranking |
 | Diff | two runs joined on their call paths: differential flame graph, biggest movers, the paths that appeared and the paths that vanished |
-| Locks, Wakeups, Timeline | M5 |
+| Timeline | M5 |
+
+The Overview leads with a **verdict**: one sentence naming the bottleneck, the
+numbers it rests on, and the screen that shows the working. It declines to name
+one when nothing dominates, and refuses to produce one at all when the stacks
+could not be resolved — the case where a confident sentence does the most harm.
+The rules and thresholds are in `src/analysis.ts`.
 
 The Diff screen expresses both runs as a share of their own total by default.
 Two measurements are almost never the same length, and comparing their raw
@@ -66,9 +74,10 @@ src/
   bundle/load.ts      File -> Bundle, and the accessors
   bundle/folded.ts    folded stacks -> flame tree, filters, search
   bundle/diff.ts      two runs -> per-path deltas, differential tree, colour
+  analysis.ts         lock ranking, wakeup hubs, and the verdict
   quality.ts          the thresholds, mirroring the collector
   components/         FlameGraph (canvas), shared UI
-  screens/            Runs, Overview, Flame, Threads, Diff
+  screens/            Runs, Overview, Flame, Threads, Locks, Wakeups, Diff
 verify.mjs            drives a real browser over file:// and times the render
 ```
 

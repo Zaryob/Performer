@@ -6,12 +6,17 @@
  * picker, times how long the flame graph takes to appear, and then compares
  * two of them.
  *
- *   node verify.mjs <bundle.tgz> [more.tgz ...]
+ *   node verify.mjs <before.tgz> [after.tgz] [unusable.tgz] [spread.tgz]
  *
- * With two or more bundles the M4 section runs: the first two are diffed and
- * the canvas is sampled to prove that paths which grew and paths which shrank
- * are actually drawn in distinguishable colours, which is what "the differing
- * code paths can be told apart" has to mean if it is to be checked at all.
+ * The arguments are positional because each one plays a part:
+ *
+ *   0  the run every single-run screen is checked against; it must contain
+ *      one deliberately contended mutex, which is the M5 acceptance case
+ *   1  a second run of the same process, diffed against the first (M4)
+ *   2  a run whose stacks could not be resolved, to check the viewer refuses
+ *      to let anyone argue from it
+ *   3  a run with no dominant bottleneck, to check the tool declines to name
+ *      one -- the half of the acceptance criterion that is easy to forget
  */
 
 import { chromium } from "playwright";
@@ -153,11 +158,11 @@ await page.waitForTimeout(150);
 check("Threads table sorts", true);
 
 // -- the unusable run -------------------------------------------------------
-// The last bundle was collected from a target without frame pointers. The
+// The third bundle was collected from a target without frame pointers. The
 // viewer must refuse to let anyone argue from that graph, not merely draw it.
 if (bundles.length > 2) {
   await page.getByRole("button", { name: "Runs", exact: true }).click();
-  await page.locator("main table tbody tr").nth(bundles.length - 1).click();
+  await page.locator("main table tbody tr").nth(2).click();
   await page.getByRole("button", { name: "Flame", exact: true }).click();
   await page.waitForSelector("canvas");
   const warning = await page.locator("main").innerText();
@@ -168,6 +173,17 @@ if (bundles.length > 2) {
   );
   await page.screenshot({ path: "verify-broken.png" });
 
+  // The verdict is the place a machine-written sentence does the most damage,
+  // so an unusable run must produce none at all rather than a confident
+  // ranking of truncated stacks.
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await page.waitForSelector("text=Verdict");
+  const brokenVerdict = await page.locator("main").innerText();
+  check(
+    "an unusable run gets no verdict rather than a confident wrong one",
+    /No verdict/.test(brokenVerdict) && !/single mutex is the bottleneck/.test(brokenVerdict),
+  );
+
   // And a diff involving it must say so too: comparing unresolved stacks
   // against anything produces a confident picture of nothing.
   await page.getByRole("button", { name: "Diff", exact: true }).click();
@@ -177,6 +193,112 @@ if (bundles.length > 2) {
     "a diff against an unusable run is flagged, not quietly drawn",
     /confident picture of nothing/.test(brokenDiff),
   );
+}
+
+// -- Locks, Wakeups and the verdict: the M5 acceptance ----------------------
+// The synthetic bundle has one deliberately hot mutex, taken mostly from
+// TimerWheel::arm(). The tool has to put *that* first, and has to name it as
+// a line of code rather than as a hex address nobody can act on.
+await page.getByRole("button", { name: "Runs", exact: true }).click();
+await page.locator("main table tbody tr").first().click();
+
+await page.getByRole("button", { name: "Locks", exact: true }).click();
+await page.waitForSelector("text=Contended locks");
+const locksText = await page.locator("main").innerText();
+const firstLockRow = await page.locator("main table tbody tr").first().innerText();
+check(
+  "the hottest lock is named by the code that takes it",
+  /TimerWheel::arm/.test(firstLockRow),
+  firstLockRow.split("\n").slice(0, 2).join(" "),
+);
+check(
+  "it does not blame the frame every contended mutex ends in",
+  !/^\s*__lll_lock_wait/m.test(firstLockRow),
+);
+check(
+  "a single dominant lock is called out as such",
+  /One address dominates/.test(locksText),
+);
+check(
+  // Case insensitive: the table headers are uppercased by CSS.
+  "lock totals are given per thread, not just summed",
+  /per thread/i.test(locksText),
+);
+await page.screenshot({ path: "verify-locks.png" });
+
+await page.getByRole("button", { name: "Wakeups", exact: true }).click();
+await page.waitForSelector("text=Wakeup graph");
+await page.evaluate(
+  () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+);
+const wakePainted = await page.evaluate(() => {
+  const canvas = document.querySelector("canvas");
+  if (!canvas) return 0;
+  const ctx = canvas.getContext("2d");
+  const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  let filled = 0;
+  for (let i = 3; i < data.length; i += 4 * 97) if (data[i] > 0) filled += 1;
+  return filled;
+});
+check("the wakeup graph painted", wakePainted > 50, `${wakePainted} sampled pixels`);
+const wakeText = await page.locator("main").innerText();
+check(
+  "the wakeup hub is identified",
+  /One thread drives the process|No single thread dominates/.test(wakeText),
+);
+await page.screenshot({ path: "verify-wakeups.png" });
+
+await page.getByRole("button", { name: "Overview", exact: true }).click();
+await page.waitForSelector("text=Verdict");
+const verdictText = await page.locator("main").innerText();
+check(
+  "the verdict names the mutex, in code rather than in hex",
+  /single mutex is the bottleneck/.test(verdictText) &&
+    /TimerWheel::arm/.test(verdictText),
+  (verdictText.match(/A single mutex[^\n]*/) ?? [""])[0],
+);
+check(
+  "the verdict carries the numbers it rests on",
+  /% of all futex wait time is on one address/.test(verdictText) &&
+    /0x[0-9a-f]+/.test(verdictText),
+);
+check(
+  "the verdict points at the screen that shows the working",
+  /→\s*Locks/.test(verdictText),
+);
+
+// The negative control, and the half of the acceptance criterion that is easy
+// to forget: a tool that names a bottleneck is only worth having if it also
+// declines to when there is not one. The fourth bundle has its futex time
+// spread across a dozen addresses and nothing to blame.
+if (bundles.length > 3) {
+  await page.getByRole("button", { name: "Runs", exact: true }).click();
+  await page.locator("main table tbody tr").nth(3).click();
+  await page.waitForSelector("text=Verdict");
+  const spreadVerdict = await page.locator("main section").first().innerText();
+  check(
+    "no lock is blamed when the waiting is spread across addresses",
+    !/single mutex is the bottleneck/.test(spreadVerdict),
+    (spreadVerdict.split("\n").filter(Boolean)[2] ?? "").slice(0, 72),
+  );
+  check(
+    // Whatever it concludes instead — this profile has a real allocator
+    // share — it has to be falsifiable on sight.
+    "whatever it concludes instead still carries its numbers",
+    /\d+%/.test(spreadVerdict),
+  );
+
+  await page.getByRole("button", { name: "Locks", exact: true }).click();
+  await page.waitForSelector("text=Contended locks");
+  const spreadLocks = await page.locator("main").innerText();
+  check(
+    "the Locks screen says so too rather than promoting its top row",
+    /No single address dominates/.test(spreadLocks),
+  );
+
+  // Back to the contended run for everything that follows.
+  await page.getByRole("button", { name: "Runs", exact: true }).click();
+  await page.locator("main table tbody tr").first().click();
 }
 
 // -- Diff: the M4 acceptance measurement ------------------------------------

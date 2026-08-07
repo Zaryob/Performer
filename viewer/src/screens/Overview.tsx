@@ -1,8 +1,10 @@
 /** One run, summarised: what was measured, and whether to believe it. */
 
+import { useMemo } from "react";
 import type { Bundle } from "../bundle/load";
 import { runDuration } from "../bundle/load";
 import { qualityFlags } from "../quality";
+import { verdict as computeVerdict, type Verdict } from "../analysis";
 import {
   Field,
   FlagList,
@@ -17,9 +19,14 @@ export function Overview({ bundle }: { bundle: Bundle }) {
   const flags = qualityFlags(manifest);
   const quality = manifest.quality;
   const system = bundle.system;
+  const verdict = useMemo(() => computeVerdict(bundle), [bundle]);
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
+      <div className="lg:col-span-2">
+        <VerdictPanel verdict={verdict} />
+      </div>
+
       <Panel
         title={manifest.run_id}
         right={<StatusBadge status={manifest.status} />}
@@ -159,5 +166,50 @@ export function Overview({ bundle }: { bundle: Bundle }) {
         </ul>
       </Panel>
     </div>
+  );
+}
+
+/**
+ * The verdict, at the top of the first screen anyone opens.
+ *
+ * A machine-written conclusion is worth having only if it is falsifiable on
+ * sight, so the claim never appears without the numbers under it and the
+ * screen that shows the working. "No single bottleneck" is presented exactly
+ * as prominently as a finding, because on a real profile it is the more
+ * common answer and burying it would push the reader toward inventing one.
+ */
+function VerdictPanel({ verdict }: { verdict: Verdict }) {
+  const tone =
+    verdict.kind === "untrustworthy"
+      ? "border-red-500/50 bg-red-500/10"
+      : verdict.kind === "none"
+        ? "border-slate-600 bg-slate-800/40"
+        : "border-amber-500/50 bg-amber-500/10";
+
+  return (
+    <section className={`rounded-lg border px-4 py-3 ${tone}`}>
+      <div className="flex items-baseline justify-between gap-4">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          Verdict
+        </h2>
+        <span className="text-xs text-slate-500">
+          {verdict.confidence} confidence
+        </span>
+      </div>
+      <p className="mt-1 text-base text-slate-100">{verdict.headline}</p>
+      {verdict.evidence.length > 0 && (
+        <ul className="mt-2 space-y-0.5 text-sm text-slate-300">
+          {verdict.evidence.map((line) => (
+            <li key={line} className="flex gap-2">
+              <span className="text-slate-500">·</span>
+              <span>{line}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {verdict.next && (
+        <p className="mt-2 text-sm text-slate-400">→ {verdict.next}</p>
+      )}
+    </section>
   );
 }

@@ -201,6 +201,7 @@ export const PATHS = {
   offcpuDuration: "hist/offcpu_duration.json",
   offcpuByState: "hist/offcpu_by_state.json",
   futexByAddr: "hist/futex_by_addr.json",
+  futexSites: "hist/futex_sites.json",
   futexDuration: "hist/futex_duration.json",
   syscallLatency: "hist/syscall_latency.json",
   threadlife: "hist/threadlife.json",

@@ -5,15 +5,23 @@ import { Overview } from "./screens/Overview";
 import { Flame } from "./screens/Flame";
 import { Threads } from "./screens/Threads";
 import { Diff } from "./screens/Diff";
+import { Locks } from "./screens/Locks";
+import { Wakeups } from "./screens/Wakeups";
 import { Empty } from "./components/ui";
 
-const SCREENS = ["Runs", "Overview", "Flame", "Threads", "Diff"] as const;
+const SCREENS = [
+  "Runs",
+  "Overview",
+  "Flame",
+  "Threads",
+  "Locks",
+  "Wakeups",
+  "Diff",
+] as const;
 type Screen = (typeof SCREENS)[number];
 
 /** Screens still to come, shown so their absence is a plan rather than a gap. */
 const PLANNED: { name: string; milestone: string }[] = [
-  { name: "Locks", milestone: "M5" },
-  { name: "Wakeups", milestone: "M5" },
   { name: "Timeline", milestone: "M5" },
 ];
 
@@ -156,6 +164,8 @@ export function App() {
               {screen === "Threads" && (
                 <Threads bundle={selected} baseline={baseline} />
               )}
+              {screen === "Locks" && <Locks bundle={selected} />}
+              {screen === "Wakeups" && <Wakeups bundle={selected} />}
             </>
           ) : (
             <Empty>Select a run first.</Empty>

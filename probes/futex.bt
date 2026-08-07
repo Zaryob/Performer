@@ -8,11 +8,17 @@
  * The highest value probe in the set. Aggregating by `uaddr` is what makes it
  * possible to say *which* mutex is hot rather than merely that futex time is
  * high: if one or two addresses dominate the total, that is a single
- * contended lock, and @futex_us shows the code paths that take it.
+ * contended lock.
  *
  * uaddr is recorded as an integer and formatted as hex in post-processing.
  * The address is only meaningful within one run of one process -- it is an
- * identity, not something to compare across runs.
+ * identity, not something to compare across runs. Which is exactly why
+ * @futex_site keys on the address *and* the stack together: "0x7f3e03018240
+ * is your problem" is not an answer anybody can act on, and the two separate
+ * aggregations cannot be joined after the fact -- knowing the hottest address
+ * and, separately, the hottest call path does not tell you they are the same
+ * contention. Paying for the combined map is what turns the finding into a
+ * line of code.
  */
 
 tracepoint:syscalls:sys_enter_futex
@@ -31,6 +37,8 @@ tracepoint:syscalls:sys_exit_futex
         @futex_us[ustack]                 = sum($waited_us);
         @futex_by_addr[@fx_addr[tid]]     = sum($waited_us);
         @futex_cnt_by_addr[@fx_addr[tid]] = count();
+        @futex_site[@fx_addr[tid], ustack]     = sum($waited_us);
+        @futex_site_cnt[@fx_addr[tid], ustack] = count();
         @futex_hist                       = hist($waited_us);
     }
     delete(@fx_start[tid]);

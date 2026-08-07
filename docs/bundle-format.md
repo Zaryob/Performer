@@ -47,6 +47,7 @@ run_20260806T142530Z_baseline/
 │   ├── offcpu_duration.json blocked interval distribution
 │   ├── offcpu_by_state.json blocked time split by task state
 │   ├── futex_by_addr.json   wait time per lock address  <- the hot lock
+│   ├── futex_sites.json     that address joined to the code that takes it
 │   ├── futex_duration.json  futex wait distribution
 │   ├── threadlife.json      threads created and destroyed, per second
 │   ├── thread_lifetime.json how long threads lived
@@ -238,6 +239,26 @@ Column metadata is explicit so the viewer sorts and formats without guessing.
 
 Rows are positional arrays matching `columns`; `null` means "not measured".
 `truncated`/`total_rows` record top-N clipping.
+
+A column of `type: "stack"` holds a folded call path — `frame;frame;frame`,
+root first, the same shape as `stacks/*.folded` without the trailing value.
+`futex_sites.json` is the reason the type exists:
+
+```json
+{ "schema_version": 1, "kind": "table", "name": "futex_sites",
+  "columns": [ { "id": "addr", "type": "hex" },
+               { "id": "stack", "type": "stack" },
+               { "id": "total_us", "type": "int", "unit": "us", "sort": "desc" } ],
+  "rows": [ ["0x7f3c8a001240",
+             "WorkerThread::run();TimerWheel::arm();pthread_mutex_lock;__lll_lock_wait",
+             6180000] ] }
+```
+
+The probe keys this map on the address **and** the stack together rather than
+emitting two maps and joining them here, because that join does not exist:
+knowing the hottest address and, separately, the hottest call path does not
+establish that they are the same contention. An address alone is an identity
+within one run; this is what turns it into a line of code.
 
 ## series/*.csv
 

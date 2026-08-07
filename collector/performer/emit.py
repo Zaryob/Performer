@@ -281,6 +281,10 @@ def emit_futex(context: EmitContext, text: str) -> EmitResult:
                 f"hottest holds {share:.0%} of the wait time"
             )
 
+    site_path = _emit_futex_sites(context, text)
+    if site_path:
+        result.outputs.append(site_path)
+
     path = _emit_histogram(
         context,
         dump,
@@ -293,6 +297,83 @@ def emit_futex(context: EmitContext, text: str) -> EmitResult:
     if path:
         result.outputs.append(path)
     return result
+
+
+def _emit_futex_sites(context: EmitContext, text: str) -> Optional[str]:
+    """Lock address joined to the call path that waited on it.
+
+    Keyed on ``[uaddr, ustack]`` in the probe, because the join cannot be made
+    afterwards: knowing the hottest address and, separately, the hottest call
+    path does not establish that they are the same contention.  A hex address
+    is an identity, not an answer; this is what turns it into a line of code.
+    """
+    dump = stack_parse.parse_maps(text)
+    entries = dump.entries("futex_site")
+    if not entries:
+        return None
+    counts = {
+        (_scalar(entry), _folded_key(entry, context)): entry.value
+        for entry in dump.entries("futex_site_cnt")
+    }
+
+    rows: List[List[Any]] = []
+    for entry in entries:
+        addr = _scalar(entry)
+        stack = _folded_key(entry, context)
+        if addr is None or stack is None:
+            continue
+        calls = counts.get((addr, stack), 0)
+        rows.append(
+            [
+                _hex_addr(addr),
+                stack,
+                entry.value,
+                calls,
+                round(entry.value / calls, 2) if calls else None,
+            ]
+        )
+    if not rows:
+        return None
+
+    context.builder.add_json(
+        layout.HIST_FUTEX_SITES,
+        hist_parse.table_doc(
+            "futex_sites",
+            "futex.bt:@futex_site",
+            [
+                {"id": "addr", "label": "uaddr", "type": "hex", "unit": "none"},
+                {"id": "stack", "label": "call path", "type": "stack"},
+                {
+                    "id": "total_us", "label": "total wait", "type": "int",
+                    "unit": "us", "sort": "desc",
+                },
+                {"id": "calls", "label": "calls", "type": "int", "unit": "count"},
+                {"id": "avg_us", "label": "avg wait", "type": "float", "unit": "us"},
+            ],
+            rows,
+            limit=MAX_TABLE_ROWS,
+            sort_by=2,
+        ),
+    )
+    return layout.HIST_FUTEX_SITES
+
+
+def _scalar(entry: stack_parse.MapEntry) -> Optional[str]:
+    scalars = entry.scalars()
+    return scalars[0] if scalars else None
+
+
+def _folded_key(entry: stack_parse.MapEntry, context: EmitContext) -> Optional[str]:
+    """The entry's stack key as a folded, root-first path."""
+    stacks = entry.stacks()
+    if not stacks:
+        return None
+    frames = [stack_parse.clean_frame(frame) for frame in reversed(stacks[0].frames)]
+    if not frames:
+        # bpftrace prints nothing at all when it could not walk the stack, and
+        # a row with an empty call path would read as "no code took this lock".
+        frames = [stack_parse.UNKNOWN]
+    return ";".join(frames)
 
 
 def _hex_addr(key: str) -> str:

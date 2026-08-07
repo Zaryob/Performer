@@ -129,6 +129,63 @@ class FutexTests(EmitterTestCase):
         self.assertIn(layout.STACK_FUTEX, result.outputs)
         self.assertIn(layout.HIST_FUTEX_DURATION, result.outputs)
 
+    def test_each_lock_is_joined_to_the_code_that_takes_it(self):
+        # An address is an identity, not an answer.  The probe keys on
+        # [uaddr, ustack] together precisely because the two separate
+        # aggregations cannot be joined afterwards.
+        result = self.run_emitter("futex")
+        self.assertIn(layout.HIST_FUTEX_SITES, result.outputs)
+        self.assert_matches_schema(layout.HIST_FUTEX_SITES, "table.schema.json")
+        doc = self.read(layout.HIST_FUTEX_SITES)
+        self.assertEqual(
+            [column["id"] for column in doc["columns"]],
+            ["addr", "stack", "total_us", "calls", "avg_us"],
+        )
+        top = doc["rows"][0]
+        self.assertTrue(top[0].startswith("0x"))
+        # Root first, so it reads as a call path rather than a stack dump, and
+        # naming the code that took the lock rather than where every contended
+        # mutex ends up.
+        self.assertTrue(top[1].startswith("WorkerThread::run()"))
+        self.assertIn("TimerWheel::arm", top[1])
+        self.assertTrue(top[1].endswith("__lll_lock_wait"))
+
+    def test_one_address_can_be_taken_from_several_places(self):
+        self.run_emitter("futex")
+        rows = self.read(layout.HIST_FUTEX_SITES)["rows"]
+        hottest = rows[0][0]
+        sites = [row for row in rows if row[0] == hottest]
+        self.assertGreater(len(sites), 1)
+        # And ranked, so the first one is the answer.
+        self.assertEqual(
+            [row[2] for row in rows], sorted((row[2] for row in rows), reverse=True)
+        )
+
+    def test_site_totals_do_not_exceed_the_address_total(self):
+        # The two maps are filled from the same events, so a site total larger
+        # than its address total would mean one of the parsers is wrong.
+        self.run_emitter("futex")
+        by_addr = {
+            row[0]: row[1] for row in self.read(layout.HIST_FUTEX_BY_ADDR)["rows"]
+        }
+        summed: dict = {}
+        for addr, _stack, total_us, _calls, _avg in self.read(
+            layout.HIST_FUTEX_SITES
+        )["rows"]:
+            summed[addr] = summed.get(addr, 0) + total_us
+        for addr, total in summed.items():
+            self.assertLessEqual(total, by_addr[addr], f"{addr} sites exceed its total")
+
+    def test_the_hist_parser_stays_quiet_about_the_joined_map(self):
+        # A single probe prints stack keyed and scalar keyed maps into one
+        # stream.  @futex_site[<addr>, <stack>] opens with a scalar, which is
+        # what the stack map detector used to miss -- and eight spurious
+        # warnings per run would end up in the manifest.
+        result = self.run_emitter("futex")
+        self.assertEqual(
+            [w for w in result.warnings if "futex_site" in w or "unrecognised" in w], []
+        )
+
 
 class WakeupTests(EmitterTestCase):
     def test_edges_are_parsed_and_ranked(self):
