@@ -8,10 +8,13 @@
  * the number of *visible* frames, and hit testing is a lookup.
  *
  * Drawn by hand rather than with d3-flame-graph, which cannot express the
- * differential mode M4 needs.
+ * differential mode. That mode is not a second renderer: the Diff screen
+ * passes `colourFor` and `describe` and gets the same picture with a
+ * different meaning assigned to colour.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   flatten,
   frameColour,
@@ -33,6 +36,26 @@ export interface FlameGraphProps {
   inverted?: boolean;
   /** Cap for very deep profiles; beyond this the graph scrolls. */
   maxHeight?: number;
+  /**
+   * Override the fill of each frame.
+   *
+   * This is the whole of what the differential mode needs from the renderer.
+   * A flame graph and a differential flame graph are the same picture with
+   * two different meanings assigned to colour, so the Diff screen passes its
+   * red/blue ramp here rather than there being a second canvas renderer to
+   * keep in step with this one. `highlighted` is the search match, which
+   * still has to win: finding a frame by name matters more than reading its
+   * delta at the moment you are looking for it.
+   */
+  colourFor?: (node: FlameNode, highlighted: boolean) => string;
+  /** Replace the second line of the tooltip, where the numbers live. */
+  describe?: (node: FlameNode) => ReactNode;
+  /**
+   * Replace the leading "N units" in the header. The differential graph's
+   * root value is a layout basis rather than a measurement, and printing it
+   * would be offering a number that means nothing.
+   */
+  summary?: ReactNode;
 }
 
 interface Hover {
@@ -47,6 +70,9 @@ export function FlameGraph({
   searchTerm = "",
   inverted = false,
   maxHeight = 900,
+  colourFor,
+  describe,
+  summary,
 }: FlameGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -111,7 +137,10 @@ export function FlameGraph({
       const { x, y, w } = geometry(node);
       if (w < MIN_DRAW_WIDTH || x > width || x + w < 0) continue;
 
-      ctx.fillStyle = frameColour(node.name, matches.matches.has(node));
+      const highlighted = matches.matches.has(node);
+      ctx.fillStyle = colourFor
+        ? colourFor(node, highlighted)
+        : frameColour(node.name, highlighted);
       ctx.fillRect(x, y, Math.max(w - 1, 0.5), ROW_HEIGHT - 1);
 
       if (w > 26) {
@@ -122,7 +151,7 @@ export function FlameGraph({
         }
       }
     }
-  }, [nodes, width, canvasHeight, geometry, matches, focus]);
+  }, [nodes, width, canvasHeight, geometry, matches, focus, colourFor]);
 
   const nodeAt = useCallback(
     (px: number, py: number): FlameNode | null => {
@@ -157,12 +186,14 @@ export function FlameGraph({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
-        <span>
-          <span className="text-slate-200 tabular-nums">
-            {total.toLocaleString()}
-          </span>{" "}
-          {unit}
-        </span>
+        {summary ?? (
+          <span>
+            <span className="text-slate-200 tabular-nums">
+              {total.toLocaleString()}
+            </span>{" "}
+            {unit}
+          </span>
+        )}
         <span>
           {nodes.length.toLocaleString()} frames, {rows} deep
         </span>
@@ -202,10 +233,16 @@ export function FlameGraph({
           >
             <div className="font-mono break-all text-slate-100">{hover.node.name}</div>
             <div className="text-slate-400 tabular-nums">
-              {hover.node.value.toLocaleString()} {unit} ·{" "}
-              {share(hover.node.value).toFixed(2)}% of total
-              {hover.node.self > 0 && (
-                <> · {hover.node.self.toLocaleString()} self</>
+              {describe ? (
+                describe(hover.node)
+              ) : (
+                <>
+                  {hover.node.value.toLocaleString()} {unit} ·{" "}
+                  {share(hover.node.value).toFixed(2)}% of total
+                  {hover.node.self > 0 && (
+                    <> · {hover.node.self.toLocaleString()} self</>
+                  )}
+                </>
               )}
             </div>
           </div>

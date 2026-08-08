@@ -10,6 +10,8 @@ help:
 	@echo "make check    build the target, byte-compile, run the tests"
 	@echo "make target   build tests/target/contention (needs a C++ compiler)"
 	@echo "make fake     write a synthetic bundle into $(RUNS)"
+	@echo "make pair     write two comparable synthetic bundles (steady + heavy)"
+	@echo "make diff     write the pair and compare them"
 	@echo "make inspect  inspect every bundle in $(RUNS)"
 	@echo "make viewer   build viewer/dist/index.html (needs npm)"
 	@echo "make docker-demo  profile the sample target with Docker Compose"
@@ -33,6 +35,15 @@ fake:
 	$(CLI) fake-run --out $(RUNS) --label baseline
 	$(CLI) fake-run --out $(RUNS) --label degraded --degraded --bad-frame-pointers
 
+# A comparable pair: the same seed, so the same roster and the same code
+# paths, at two different loads. What a diff finds is then the load.
+pair:
+	$(CLI) fake-run --out $(RUNS) --label steady --duration 60 --load steady --seed 4242
+	$(CLI) fake-run --out $(RUNS) --label heavy  --duration 90 --load heavy  --seed 4242
+
+diff: pair
+	@$(CLI) diff $(RUNS)/*steady.tgz $(RUNS)/*heavy.tgz --kind oncpu
+
 profiles:
 	@$(CLI) schema >/dev/null && ls collector/profiles/*.yaml
 
@@ -54,6 +65,10 @@ docker-fake:
 
 docker-down:
 	docker compose down --remove-orphans
+# Needs root to actually collect; without it the API answers can_collect:false
+# and the browser says so before anything is disturbed.
+serve:
+	$(CLI) daemon --out $(RUNS)
 
 clean:
 	rm -rf $(RUNS)

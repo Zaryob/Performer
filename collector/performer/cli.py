@@ -4,7 +4,6 @@ Exit codes:
     0  success
     1  failure (unreadable bundle, failed validation, strict flag tripped)
     2  usage error (argparse)
-    3  command exists but is not implemented in this milestone
 """
 
 from __future__ import annotations
@@ -16,18 +15,13 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from . import __version__, layout, profiles
+from . import diff as diff_mod
 from .bundle import Bundle
 from .errors import PerformerError
 from .report import LEVEL_ERROR, build_summary, render, summary_json
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
-EXIT_NOT_IMPLEMENTED = 3
-
-_NOT_IMPLEMENTED = {
-    "diff": "M4 -- run comparison is not implemented yet",
-    "daemon": "M6 -- the localhost API is not implemented yet",
-}
 
 
 PROG = "performer"
@@ -176,6 +170,24 @@ def _build_parser() -> argparse.ArgumentParser:
     fake.add_argument("--pid", type=int, default=205852)
     fake.add_argument("--profile", default="standard")
     fake.add_argument("--seed", type=int, default=20260806)
+    # Imported here rather than at the top so that `performer --version` and
+    # the error paths do not pay for the generator.
+    from .fake import DEFAULT_LOAD, LOAD_SCENARIOS
+
+    fake.add_argument(
+        "--load",
+        default=DEFAULT_LOAD,
+        choices=sorted(LOAD_SCENARIOS),
+        help=(
+            "load scenario, so two bundles differ the way two measurements of "
+            "the same process under different load do ("
+            + "; ".join(
+                f"{name}: {scenario.description}"
+                for name, scenario in sorted(LOAD_SCENARIOS.items())
+            )
+            + ")"
+        ),
+    )
     fake.add_argument("--tag", action="append", default=[], dest="tags")
     fake.add_argument("--notes", default="")
     fake.add_argument(
@@ -193,14 +205,103 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     fake.set_defaults(func=_cmd_fake_run)
 
+    diff = sub.add_parser(
+        "diff",
+        help="compare two run bundles and print what changed",
+        description=(
+            "Joins two runs on their call paths and reports the paths that "
+            "grew, the paths that shrank, and -- separately, because they are "
+            "usually the finding -- the paths that exist in only one of them. "
+            "This is the same computation as the viewer's Diff screen."
+        ),
+    )
+    diff.add_argument("before", type=Path, metavar="A", help="the baseline run")
+    diff.add_argument("after", type=Path, metavar="B", help="the run to compare against it")
+    diff.add_argument(
+        "--kind",
+        action="append",
+        dest="kinds",
+        choices=[entry[0] for entry in diff_mod.STACK_KINDS],
+        help="stack file to compare (repeatable; default: every kind both runs have)",
+    )
+    diff.add_argument(
+        "--raw",
+        action="store_true",
+        help=(
+            "compare raw counts instead of each run's share of its own total; "
+            "only meaningful when the two runs are the same length"
+        ),
+    )
+    diff.add_argument(
+        "--per-thread",
+        action="store_true",
+        help="keep the thread name frame, so the same path in two threads stays separate",
+    )
+    diff.add_argument("--thread", default="", help="only paths whose thread name matches")
+    diff.add_argument(
+        "--min-share",
+        type=float,
+        default=diff_mod.DEFAULT_MIN_SHARE,
+        metavar="F",
+        help=(
+            "ignore paths below this share of both runs "
+            f"(default {diff_mod.DEFAULT_MIN_SHARE}; 0 keeps everything)"
+        ),
+    )
+    diff.add_argument(
+        "--top", type=int, default=diff_mod.DEFAULT_TOP, help="rows per section"
+    )
+    diff.add_argument("--json", action="store_true")
+    diff.set_defaults(func=_cmd_diff)
+
+    daemon = sub.add_parser(
+        "daemon",
+        help="serve the viewer and a localhost API for starting measurements",
+        description=(
+            "Binds 127.0.0.1 only, prints a bearer token once, and serves the "
+            "built viewer so that a measurement can be started from the "
+            "browser. Every API request needs the token; profiles are chosen "
+            "by name from a whitelist; nothing from a request reaches a shell."
+        ),
+    )
+    daemon.add_argument("--port", type=int, default=7878)
+    daemon.add_argument(
+        "--out", type=Path, default=Path("./runs"), help="where bundles are written"
+    )
+    daemon.add_argument(
+        "--profile",
+        action="append",
+        dest="allowed_profiles",
+        metavar="NAME",
+        help=(
+            "restrict the API to this profile (repeatable). "
+            "Default: every installed profile"
+        ),
+    )
+    daemon.add_argument(
+        "--token",
+        default=None,
+        help=(
+            "use this token instead of generating one. Intended for scripts; "
+            "a generated token is better than one that ends up in a shell history"
+        ),
+    )
+    daemon.add_argument(
+        "--no-viewer",
+        action="store_true",
+        help="serve the API only, without the built viewer",
+    )
+    daemon.add_argument(
+        "--open", action="store_true", dest="open_browser", help="open a browser"
+    )
+    daemon.add_argument(
+        "--bpftrace", default=None, help="path to the bpftrace binary to use"
+    )
+    daemon.set_defaults(func=_cmd_daemon)
+
     schema = sub.add_parser("schema", help="show the bundle schemas this build enforces")
     schema.add_argument("name", nargs="?", help="schema file to print, e.g. manifest")
     schema.set_defaults(func=_cmd_schema)
-
-    for name, reason in _NOT_IMPLEMENTED.items():
-        stub = sub.add_parser(name, help=f"not implemented yet ({reason.split(' -- ')[0]})")
-        stub.add_argument("args", nargs=argparse.REMAINDER)
-        stub.set_defaults(func=_cmd_not_implemented, _reason=reason, _name=name)
 
     return parser
 
@@ -303,6 +404,7 @@ def _cmd_fake_run(args: argparse.Namespace) -> int:
         pid=args.pid,
         profile=args.profile,
         seed=args.seed,
+        load=args.load,
         degraded=args.degraded,
         bad_frame_pointers=args.bad_frame_pointers,
         tags=args.tags or ["synthetic"],
@@ -314,6 +416,54 @@ def _cmd_fake_run(args: argparse.Namespace) -> int:
         print(f"bundle:        {archive}")
     print(f"inspect with:  {PROG} inspect {archive}")
     return EXIT_OK
+
+
+def _cmd_diff(args: argparse.Namespace) -> int:
+    with Bundle.open(args.before) as before, Bundle.open(args.after) as after:
+        result = diff_mod.compare(
+            before,
+            after,
+            kinds=args.kinds,
+            normalise=not args.raw,
+            merge_threads=not args.per_thread,
+            thread_filter=args.thread,
+            min_share=args.min_share,
+        )
+        if args.json:
+            print(json.dumps(result.to_dict(top=args.top), indent=2))
+        else:
+            print(diff_mod.render(result, top=args.top))
+        if not result.stacks:
+            print(
+                "\nno stack file is present in both runs; only the thread "
+                "comparison above could be made",
+                file=sys.stderr,
+            )
+    return EXIT_OK
+
+
+def _cmd_daemon(args: argparse.Namespace) -> int:
+    from . import daemon as daemon_mod
+
+    allowed = tuple(args.allowed_profiles) if args.allowed_profiles else None
+    if allowed:
+        unknown = [name for name in allowed if name not in profiles.available()]
+        if unknown:
+            raise PerformerError(
+                f"unknown profile(s): {', '.join(unknown)}; available: "
+                + ", ".join(sorted(profiles.available()))
+            )
+    return daemon_mod.serve(
+        daemon_mod.DaemonOptions(
+            out_dir=args.out,
+            port=args.port,
+            token=args.token,
+            allowed_profiles=allowed,
+            bpftrace=args.bpftrace,
+            serve_viewer=not args.no_viewer,
+            open_browser=args.open_browser,
+        )
+    )
 
 
 def _cmd_schema(args: argparse.Namespace) -> int:
@@ -333,44 +483,11 @@ def _cmd_schema(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _cmd_not_implemented(args: argparse.Namespace) -> int:
-    print(
-        f"{PROG} {args._name}: not implemented yet ({args._reason}).",
-        file=sys.stderr,
-    )
-    print(
-        "This milestone (M0) fixes the bundle format only. "
-        "See README.md for the milestone plan.",
-        file=sys.stderr,
-    )
-    return EXIT_NOT_IMPLEMENTED
-
-
 # --------------------------------------------------------------------------
-
-
-def _stub_command(argv: Sequence[str]) -> Optional[str]:
-    """Detect a not-yet-implemented command before argparse sees its flags.
-
-    ``collect --pid 205852 ...`` must answer "not implemented yet", not
-    "unrecognized arguments: --pid": the operator's mistake is the milestone,
-    not the syntax.  ``--help`` still falls through to argparse.
-    """
-    if any(flag in argv for flag in ("-h", "--help")):
-        return None
-    for token in argv:
-        if not token.startswith("-"):
-            return token if token in _NOT_IMPLEMENTED else None
-    return None
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     raw = list(argv) if argv is not None else sys.argv[1:]
-    stub = _stub_command(raw)
-    if stub is not None:
-        namespace = argparse.Namespace(_name=stub, _reason=_NOT_IMPLEMENTED[stub])
-        return _cmd_not_implemented(namespace)
-
     parser = _build_parser()
     args = parser.parse_args(raw)
     if getattr(args, "func", None) is None:

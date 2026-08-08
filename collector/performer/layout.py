@@ -47,6 +47,10 @@ STACK_OFFWAKE = f"{DIR_STACKS}/offwake.folded"
 HIST_RUNQLAT = f"{DIR_HIST}/runqlat.json"
 HIST_SYSCALL_LATENCY = f"{DIR_HIST}/syscall_latency.json"
 HIST_FUTEX_BY_ADDR = f"{DIR_HIST}/futex_by_addr.json"
+#: Lock address *and* the call path that waited on it, in one table.  The two
+#: separate aggregations cannot be joined after the fact, and a hex address on
+#: its own is not something anybody can act on.
+HIST_FUTEX_SITES = f"{DIR_HIST}/futex_sites.json"
 HIST_FUTEX_DURATION = f"{DIR_HIST}/futex_duration.json"
 HIST_OFFCPU_DURATION = f"{DIR_HIST}/offcpu_duration.json"
 HIST_OFFCPU_BY_STATE = f"{DIR_HIST}/offcpu_by_state.json"
@@ -145,6 +149,32 @@ def schema_dir() -> Path:
 
 def schema_path(name: str) -> Path:
     return schema_dir() / name
+
+
+def viewer_index() -> Optional[Path]:
+    """Locate the built viewer, if this checkout has one.
+
+    The daemon serves it, which is not a convenience: ``file://`` forbids
+    ``fetch``, so a viewer opened by double click cannot call an API at all.
+    Being served is what makes "collect a new run from the browser" possible,
+    and it is the only difference between the two modes.
+    """
+    override = os.environ.get("PERFORMER_VIEWER_DIST")
+    if override:
+        candidate = Path(override)
+        if candidate.is_dir():
+            candidate = candidate / "index.html"
+        return candidate if candidate.is_file() else None
+    here = Path(__file__).resolve()
+    candidates: Sequence[Path] = (
+        here.parent.parent.parent / "viewer" / "dist" / "index.html",
+        here.parent.parent / "viewer" / "dist" / "index.html",
+        here.parent / "viewer" / "index.html",
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def schema_for(bundle_relpath: str, kind: Optional[str] = None) -> Optional[str]:

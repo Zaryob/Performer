@@ -76,7 +76,20 @@ class CollectResult:
     probes: List[manifest_mod.ProbeResult] = field(default_factory=list)
 
 
-def collect(options: CollectOptions, *, printer: Printer = print) -> CollectResult:
+def collect(
+    options: CollectOptions,
+    *,
+    printer: Printer = print,
+    cancel: Optional[threading.Event] = None,
+) -> CollectResult:
+    """Measure a process and write a run bundle.
+
+    ``cancel`` is how a caller that is not a terminal stops a run: setting it
+    ends the collection exactly as Ctrl-C would, which means the probes are
+    still SIGINTed in order and the bundle is still written.  A cancelled run
+    is a short run, not a lost one -- there is no path here that throws away
+    data that has already been paid for.
+    """
     profile = profiles.load(options.profile_name)
     _check_duration(options, profile)
 
@@ -117,7 +130,9 @@ def collect(options: CollectOptions, *, printer: Printer = print) -> CollectResu
 
     watcher = TargetWatcher(options.pid)
     sampler = SeriesSampler(options.pid)
-    interrupted = threading.Event()
+    # The caller's event when there is one, so a cancellation that arrives
+    # while the probes are still attaching is not lost between the two.
+    interrupted = cancel if cancel is not None else threading.Event()
 
     launched = _launch_probes(builder, profile, report, options, printer)
 

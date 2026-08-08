@@ -30,11 +30,11 @@ lab box, so it uses **nothing outside the Python standard library** — no pip,
 no virtualenv, no network. The viewer is a static bundle that works from
 `file://`, so it needs no server and parses bundles entirely client-side.
 
-## Status: M3 complete
+## Status: complete through M6
 
-M0 fixed the contract, M1 made one probe real, M2 completed the collector, and
-M3 makes the data readable: a static viewer that opens by double click and
-renders a 315-thread profile in a fifth of a second.
+M0 fixed the contract, M1 made one probe real, M2 completed the collector, M3
+made the data readable, M4 made two runs comparable, M5 reached a conclusion,
+and M6 closes the loop: measure and look, in one place.
 
 | Milestone | Scope | State |
 |---|---|---|
@@ -42,13 +42,12 @@ renders a 315-thread profile in a fifth of a second.
 | **M1** | `preflight.py`, `collect` with `oncpu.bt`, folded stacks, real bundles | **done** |
 | **M2** | Full probe set, YAML profiles, histogram/table parsers, partial bundles | **done** |
 | **M3** | Viewer: bundle loading, Overview, Flame (filter + search), Threads | **done** |
-| M4 | Diff screen, differential flame graph, normalisation | todo |
-| M5 | Locks table, wakeup graph, automatic verdict sentence | todo |
-| M6 | localhost daemon, click-to-collect | todo |
+| **M4** | Diff screen, differential flame graph, normalisation, `performer diff` | **done** |
+| **M5** | Locks screen, wakeup graph, automatic verdict sentence | **done** |
+| **M6** | localhost daemon, token auth, click-to-collect | **done** |
 
-`diff` and `daemon` are registered as commands today and exit with code 3 and
-an explicit "not implemented in this milestone" message. They never pretend to
-have worked.
+`daemon` is registered as a command today and exits with code 3 and an explicit
+"not implemented in this milestone" message. It never pretends to have worked.
 
 ## Profiles
 
@@ -213,9 +212,10 @@ an error-level flag exit 1, which is what a future CI gate would use.
 | `preflight --pid N` | Run the environment checks without collecting. `--skip-trials`, `--json` |
 | `inspect <bundle>...` | Manifest summary, quality flags, schema check. `--json`, `--strict`, `--verbose`, `--no-validate` |
 | `validate <bundle>...` | Schema + cross-field validation only, exit 1 on failure. `--verify-hashes` |
-| `fake-run` | Write a synthetic bundle. `--degraded`, `--bad-frame-pointers`, `--threads`, `--seed`, `--no-pack` |
+| `diff A B` | Compare two runs: movers, new and vanished call paths, thread deltas. `--kind`, `--raw`, `--per-thread`, `--thread`, `--min-share`, `--top`, `--json` |
+| `fake-run` | Write a synthetic bundle. `--load steady\|heavy`, `--degraded`, `--bad-frame-pointers`, `--threads`, `--seed`, `--no-pack` |
+| `daemon` | Serve the viewer and a localhost API for starting measurements. `--port`, `--out`, `--profile` (repeatable whitelist), `--token`, `--no-viewer`, `--open` |
 | `schema [name]` | Show or print the schemas this build enforces |
-| `diff` / `daemon` | Registered, not implemented (exit 3) |
 
 Bundles are accepted as either a `.tgz` or an unpacked run directory.
 
@@ -230,12 +230,20 @@ no server, no toolchain, no network — and bundles are read in the browser
 through the file picker or by dropping them on the page. Nothing is uploaded,
 because there is nowhere to upload to.
 
+On the *target* machine there is a second mode, described under
+[Collecting from the browser](#collecting-from-the-browser) below: the same
+file, served by `performer daemon`, with a **New measurement** button that the
+`file://` copy does not have.
+
 | screen | what it answers |
 |---|---|
 | **Runs** | which bundles are loaded, and which of them can be trusted |
 | **Overview** | what this run measured, which probes delivered, and the quality block |
 | **Flame** | where the time goes — on-CPU, off-CPU or futex, with search, zoom, icicle mode, a thread filter and an idle-thread cutoff |
 | **Threads** | every thread's CPU and runqueue time, sortable — read from `/proc`, so it survives total probe failure |
+| **Locks** | which mutex is costing you, ranked, and — the part that matters — which code takes it |
+| **Wakeups** | who wakes whom, as a graph, because a thread that wakes three hundred others is invisible in every other view |
+| **Diff** | what changed between two runs: a differential flame graph, the biggest movers, and the call paths that appeared or vanished |
 
 Two decisions the 315-thread case forced. The graph is drawn on a **canvas**,
 not as SVG: tens of thousands of DOM rects take seconds to lay out and stutter
@@ -248,6 +256,135 @@ reason to ask.
 A run whose stacks could not be resolved gets a banner **on the graph itself**,
 not just a flag elsewhere: a flame graph over `[unknown]` frames looks exactly
 like a real one, which is what makes it dangerous.
+
+## The verdict
+
+The Overview opens with a sentence naming the bottleneck:
+
+> **A single mutex is the bottleneck: the one taken by `TimerWheel::arm()`.**
+> · 83% of all futex wait time is on one address (`0x7f3c8a001240`)
+> · 7,182 s of waiting across 1,795,500 waits — 38% of each thread's time, on average
+> · 86% of that address's wait comes from `TimerWheel::arm()`
+> → Locks — the call paths that take it are listed under that address.
+
+Everything else in this tool presents evidence and lets you weigh it, which is
+the right default. It is also not enough: the person who most needs the tool is
+the one who does not already know that a 90% share of futex time at one address
+means a single contended mutex. Three rules keep the sentence from becoming a
+liability:
+
+* **A verdict carries its evidence.** Never the claim alone — always the share,
+  the address, the call path, and the screen that shows the working. A
+  conclusion you cannot falsify on sight is worse than none.
+* **"Nothing dominates" is a valid answer**, presented just as prominently. On a
+  real profile it is the more common one, and burying it would push the reader
+  into inventing a finding.
+* **Unusable data produces no verdict at all.** A run whose stacks did not
+  resolve still yields a confident-looking ranking, and that is precisely when
+  a machine-written sentence does the most damage.
+
+The thresholds live in `viewer/src/analysis.ts` and are deliberately high. The
+cost of a false positive is someone spending a week on the wrong lock; the cost
+of a false negative is that they read the screens themselves, which they were
+going to do anyway.
+
+**A lock address is not an answer.** `0x7f3c8a001240` is an identity within one
+run and nothing more, so `futex.bt` keys its map on the address *and* the stack
+together. That costs a second aggregation, and it is the difference between a
+finding and a line of code: the two separate maps cannot be joined afterwards,
+because knowing the hottest address and, separately, the hottest call path does
+not establish that they are the same contention.
+
+## Collecting from the browser
+
+```console
+# performer daemon --out /var/tmp/runs
+performer daemon on http://127.0.0.1:7878/
+  output directory: /var/tmp/runs
+  profiles:         deep, light, standard
+
+  token: 8Qw1v...
+  open:  http://127.0.0.1:7878/?token=8Qw1v...
+```
+
+Open that link on the target machine and the viewer gains a **New
+measurement** button: pick a process from a list that shows thread counts,
+pick a profile, watch the collector's output stream, and the finished bundle
+opens in the same page. No download folder, no second tool, no `scp`.
+
+The button is absent — not disabled — when the page was opened as a file,
+because `file://` forbids `fetch` and an API call could never have worked
+there anyway.
+
+This is the only part of Performer that listens on a socket, and it runs as
+root on a machine somebody cares about. Its design is therefore mostly a list
+of refusals:
+
+| | |
+|---|---|
+| **Loopback only** | Binds `127.0.0.1`, and rejects any request whose `Host` header is not a loopback name — that is the DNS-rebinding defence, and the header is the only thing distinguishing a rebound request from a real one. |
+| **Bearer token** | Printed once at startup, compared with `compare_digest`, never in a cookie. The page takes it out of the URL on load so it does not linger in history or a screenshot. |
+| **No CORS headers, ever** | Silence is how "another origin may not read this" is said. Cross-origin `POST`s are refused outright. |
+| **Profiles by name** | Chosen from a whitelist; `--profile light` restricts a box to the cheap tier. A path never comes from a request. |
+| **Nothing reaches a shell** | The collector runs bpftrace through `subprocess` without `shell=True`, and labels, tags and pids are validated at the edge anyway — "it happens to be safe two layers down" is not a property that survives a refactor. |
+| **Paths are checked twice** | A run id is matched against `RUN_ID_RE` *and* the resolved path is confirmed to be inside the output directory, so loosening the pattern later cannot silently become a file disclosure. |
+| **One job at a time** | Two concurrent eBPF attachments is the way to make an overhead estimate meaningless. |
+
+Cancelling a run is not a kill: it sets the same event Ctrl-C does, so the
+probes are still SIGINTed in order and the bundle is still written. A
+cancelled run is a short run, not a lost one.
+
+`tests/test_daemon.py` drives a real server on a real socket for each of
+these, including the four the milestone names — shell metacharacters, path
+traversal, invalid pid, missing token.
+
+## Comparing two runs
+
+Nobody profiles a process once. The comparison is the deliverable, and it is
+available both on the Diff screen and in a terminal:
+
+```console
+$ performer diff before.tgz after.tgz
+```
+
+```
+A  steady60  20260806T222835Z-steady60  [ok]
+B  heavy90   20260806T222836Z-heavy90   [ok]
+
+   duration   60 s -> 90 s      profile  standard -> standard
+
+oncpu  (17,109 -> 39,537 samples, compared as share of each run)
+   60 paths compared; 19.09% grew, 19.09% shrank
+
+          A         B      delta     rel  call path (leaf last)
+      3.63%     5.30%     +1.67%    +46%  ...TimerWheel::arm();__lll_lock_wait;std::_Rb_tree_increment
+      7.05%     5.45%     -1.61%    -23%  ...UserLogic::onEvent();UserLogic::compute();__memmove_avx
+      0.00%     1.42%     +1.42%     new  ...EventQueue::grow();operator new;_int_malloc;arena_get2
+```
+
+Three decisions do most of the work:
+
+* **Shares, not counts.** Both runs are divided by their own total by default.
+  Comparing raw counts across a 60 s and a 90 s run is the standard way to
+  read a diff backwards: everything in the longer one "grew". The corollary is
+  worth stating — a path with an *unchanged* sample count is reported as
+  having **fallen**, because it did.
+* **New and vanished paths get their own lists.** "This call path did not
+  exist before" is a stronger finding than any percentage, and it is exactly
+  what a table sorted by delta buries. `--min-share` sets a noise floor, and
+  what it removed is counted rather than hidden.
+* **Frames are normalised before the join.** Offsets and module suffixes are
+  stripped, so `_int_malloc+0x1f4` and `_int_malloc+0x2a0` are one path and a
+  rebuilt binary does not read as a rewrite.
+
+Threads are compared **by name**, not by tid: tids are not stable across runs,
+so a per-tid comparison reports the whole pool destroyed and recreated every
+time. Times are per second of run, for the same reason shares are used above.
+
+`fake-run --load heavy` writes a synthetic bundle that differs from the
+`steady` one the way a real process under more load would — the same seed
+gives both runs the same thread roster and the same code paths, so what a diff
+finds is the load rather than the random number generator.
 
 ## Bundle format
 
@@ -403,9 +540,19 @@ literally.
    its own small YAML reader.
 8. **The flame graph uses no d3.** The spec says to draw it by hand rather than
    with `d3-flame-graph`, which cannot express M4's differential mode — that
-   part is honoured. But once the renderer is a canvas, d3 contributes nothing
-   a few lines of arithmetic do not, so a quarter of a megabyte of dependency
-   would be paid for nothing in a file that has to be opened offline.
+   part is honoured, and M4 collected on it: the Diff screen reuses the same
+   renderer with a `colourFor` hook rather than adding a second one. But once
+   the renderer is a canvas, d3 contributes nothing a few lines of arithmetic
+   do not, so a quarter of a megabyte of dependency would be paid for nothing
+   in a file that has to be opened offline.
+9. **The differential graph is drawn at `a + b` wide, not `b` wide.**
+   `difffolded.pl` takes widths from the newer run, which makes a call path
+   that *vanished* zero pixels wide — often the most interesting thing that
+   happened — and answers that with a second, negated graph. The additive
+   basis puts both directions on one picture, and it is also the only choice
+   that keeps a flame graph layout valid: a parent must be at least as wide as
+   its children, `a + b` is additive and the intuitive `max(a, b)` is not.
+   The conventional single-run bases are still one dropdown away.
 
 ## Licence
 

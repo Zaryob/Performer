@@ -47,9 +47,24 @@ another screen. The thresholds live in `src/quality.ts` and mirror
 | Runs | loaded bundles, quality flags, select one |
 | Overview | run summary, probe table, quality block, artifacts |
 | Flame | on-CPU / off-CPU / futex, search, zoom, icicle, thread filter, hide idle |
-| Threads | every thread with CPU and runqueue time, sortable |
-| Diff | M4 |
-| Locks, Wakeups, Timeline | M5 |
+| Threads | every thread with CPU and runqueue time, sortable; delta columns against a baseline run |
+| Locks | contended mutexes ranked by wait time, each attributed to the code that takes it |
+| Wakeups | force-directed wakeup graph plus the waker ranking |
+| Diff | two runs joined on their call paths: differential flame graph, biggest movers, the paths that appeared and the paths that vanished |
+| Collect | only when a daemon is serving this page: pick a process, pick a profile, watch the run, open the result |
+| Timeline | M5 |
+
+The Overview leads with a **verdict**: one sentence naming the bottleneck, the
+numbers it rests on, and the screen that shows the working. It declines to name
+one when nothing dominates, and refuses to produce one at all when the stacks
+could not be resolved — the case where a confident sentence does the most harm.
+The rules and thresholds are in `src/analysis.ts`.
+
+The Diff screen expresses both runs as a share of their own total by default.
+Two measurements are almost never the same length, and comparing their raw
+counts is the standard way to read a diff backwards — everything in the longer
+run "grew". Frames are normalised (offsets and module suffixes stripped)
+before the join, so a rebuilt binary does not read as a rewrite.
 
 ## Layout
 
@@ -59,10 +74,15 @@ src/
   bundle/untar.ts     ustar + PAX reader, defensive
   bundle/load.ts      File -> Bundle, and the accessors
   bundle/folded.ts    folded stacks -> flame tree, filters, search
+  bundle/diff.ts      two runs -> per-path deltas, differential tree, colour
+  analysis.ts         lock ranking, wakeup hubs, and the verdict
+  api.ts              the daemon, when one is serving this page
   quality.ts          the thresholds, mirroring the collector
   components/         FlameGraph (canvas), shared UI
-  screens/            Runs, Overview, Flame, Threads
+  screens/            Runs, Overview, Flame, Threads, Locks, Wakeups, Diff,
+                      Collect
 verify.mjs            drives a real browser over file:// and times the render
+verify-daemon.mjs     drives "New measurement" against a running daemon
 ```
 
 `dist/` is committed so the analysis machine needs no toolchain. Rebuild it

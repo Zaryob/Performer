@@ -13,6 +13,7 @@ __pycache__/
 viewer/node_modules/
 viewer/.vite/
 viewer/verify-*.png
+viewer/tsconfig.tsbuildinfo
 
 # Built test target (source is tracked, the binary is not).
 /tests/target/contention

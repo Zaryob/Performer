@@ -128,6 +128,48 @@ FUTEX = """@futex_us[
 @futex_cnt_by_addr[139904315130432]: 41920
 @futex_cnt_by_addr[139904315131208]: 2140
 @futex_cnt_by_addr[139904315133456]: 310
+@futex_site[139904315130432,
+    __lll_lock_wait+40
+    pthread_mutex_lock+274
+    TimerWheel::arm(unsigned long, std::function<void ()>)+188
+    WorkerThread::run()+1080
+]: 6180000
+@futex_site[139904315130432,
+    __lll_lock_wait+40
+    pthread_mutex_lock+274
+    TimerWheel::cancel(unsigned long)+96
+    WorkerThread::run()+1080
+]: 640000
+@futex_site[139904315131208,
+    pthread_cond_wait+512
+    EventQueue::pop()+44
+    WorkerThread::run()+1080
+]: 118400
+@futex_site[139904315133456,
+    pthread_cond_wait+512
+    Dispatcher::run()+220
+]: 9200
+@futex_site_cnt[139904315130432,
+    __lll_lock_wait+40
+    pthread_mutex_lock+274
+    TimerWheel::arm(unsigned long, std::function<void ()>)+188
+    WorkerThread::run()+1080
+]: 38100
+@futex_site_cnt[139904315130432,
+    __lll_lock_wait+40
+    pthread_mutex_lock+274
+    TimerWheel::cancel(unsigned long)+96
+    WorkerThread::run()+1080
+]: 3820
+@futex_site_cnt[139904315131208,
+    pthread_cond_wait+512
+    EventQueue::pop()+44
+    WorkerThread::run()+1080
+]: 2140
+@futex_site_cnt[139904315133456,
+    pthread_cond_wait+512
+    Dispatcher::run()+220
+]: 310
 @futex_hist:
 [32, 64)             410 |@@@@@@@@@@@                                         |
 [64, 128)           1820 |@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  |
