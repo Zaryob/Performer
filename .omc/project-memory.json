@@ -1,0 +1,154 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1786041081694,
+  "projectRoot": "/Users/zaryob/Development/Performer",
+  "techStack": {
+    "languages": [
+      {
+        "name": "C/C++",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "Makefile"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "make build",
+    "testCommand": "make test",
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "collector": {
+      "path": "collector",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1786041081686,
+      "keyFiles": []
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 1,
+      "lastAccessed": 1786041081686,
+      "keyFiles": [
+        "bundle-format.md"
+      ]
+    },
+    "probes": {
+      "path": "probes",
+      "purpose": null,
+      "fileCount": 9,
+      "lastAccessed": 1786041081686,
+      "keyFiles": [
+        "README.md",
+        "futex.bt",
+        "offcpu.bt",
+        "oncpu.bt",
+        "runqlat.bt"
+      ]
+    },
+    "schema": {
+      "path": "schema",
+      "purpose": null,
+      "fileCount": 7,
+      "lastAccessed": 1786041081686,
+      "keyFiles": [
+        "hist.schema.json",
+        "manifest.schema.json",
+        "system.schema.json",
+        "table.schema.json",
+        "target.schema.json"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 16,
+      "lastAccessed": 1786041081686,
+      "keyFiles": [
+        "__init__.py",
+        "fake_bpftrace.py",
+        "support.py",
+        "test_bundle.py",
+        "test_cli.py"
+      ]
+    },
+    "viewer": {
+      "path": "viewer",
+      "purpose": null,
+      "fileCount": 7,
+      "lastAccessed": 1786041081686,
+      "keyFiles": [
+        "README.md",
+        "index.html",
+        "package-lock.json",
+        "package.json",
+        "tsconfig.json"
+      ]
+    },
+    "collector/bin": {
+      "path": "collector/bin",
+      "purpose": "Executable scripts",
+      "fileCount": 1,
+      "lastAccessed": 1786041081687,
+      "keyFiles": [
+        "performer"
+      ]
+    },
+    "tests/fixtures": {
+      "path": "tests/fixtures",
+      "purpose": "Test fixtures",
+      "fileCount": 0,
+      "lastAccessed": 1786041081687,
+      "keyFiles": []
+    },
+    "viewer/dist": {
+      "path": "viewer/dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 1,
+      "lastAccessed": 1786041081687,
+      "keyFiles": [
+        "index.html"
+      ]
+    },
+    "viewer/src": {
+      "path": "viewer/src",
+      "purpose": "Source code",
+      "fileCount": 4,
+      "lastAccessed": 1786041081687,
+      "keyFiles": [
+        "App.tsx",
+        "index.css",
+        "main.tsx"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}

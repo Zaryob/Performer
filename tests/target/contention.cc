@@ -9,6 +9,7 @@
 //   --hold-us U        microseconds spent inside that critical section
 //   --sleep-us U       microseconds slept per iteration (timer/idle pressure)
 //   --work N           units of pure user-space CPU per iteration
+//   --churn-ms N       create one short-lived thread every N milliseconds
 //   --seconds S        run time, 0 = until SIGTERM
 //
 // With --contention 90 --hold-us 50 the dominant cost is one mutex, and a
@@ -27,7 +28,6 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -41,6 +41,7 @@ struct Options {
   int hold_us = 20;
   int sleep_us = 200;
   int work_units = 200;
+  int churn_ms = 0;
   int seconds = 10;
 };
 
@@ -48,6 +49,7 @@ std::mutex g_shared_mutex;      // the one hot lock
 std::atomic<long> g_shared_counter{0};
 std::atomic<bool> g_running{true};
 std::atomic<long> g_iterations{0};
+std::atomic<int> g_named_workers{0};
 
 // Deliberately not inlined so the frames show up in a stack trace with a
 // meaningful name. Each is a distinct call path the profiler should separate.
@@ -72,7 +74,26 @@ __attribute__((noinline)) void sleep_a_while(int sleep_us) {
   std::this_thread::sleep_for(std::chrono::microseconds(sleep_us));
 }
 
+void set_current_thread_name(const char* name) {
+#if defined(__APPLE__)
+  pthread_setname_np(name);
+#else
+  pthread_setname_np(pthread_self(), name);
+#endif
+}
+
+__attribute__((noinline)) void short_lived_worker() {
+  set_current_thread_name("short-lived");
+  volatile long sink = burn_cpu(20);
+  (void)sink;
+}
+
 __attribute__((noinline)) void worker_loop(const Options& opt, int index) {
+  char name[16];
+  std::snprintf(name, sizeof(name), "worker%d", index);
+  set_current_thread_name(name);
+  g_named_workers.fetch_add(1, std::memory_order_release);
+
   unsigned seed = static_cast<unsigned>(index * 2654435761u + 12345u);
   volatile long sink = 0;
   while (g_running.load(std::memory_order_relaxed)) {
@@ -110,11 +131,13 @@ int main(int argc, char** argv) {
     else if (arg == "--hold-us") { opt.hold_us = int_arg(argc, argv, i++, "--hold-us"); }
     else if (arg == "--sleep-us") { opt.sleep_us = int_arg(argc, argv, i++, "--sleep-us"); }
     else if (arg == "--work") { opt.work_units = int_arg(argc, argv, i++, "--work"); }
+    else if (arg == "--churn-ms") { opt.churn_ms = int_arg(argc, argv, i++, "--churn-ms"); }
     else if (arg == "--seconds") { opt.seconds = int_arg(argc, argv, i++, "--seconds"); }
     else if (arg == "--help") {
       std::printf(
           "usage: contention [--threads N] [--contention PCT] [--hold-us U]\n"
-          "                  [--sleep-us U] [--work N] [--seconds S]\n");
+          "                  [--sleep-us U] [--work N] [--churn-ms N]\n"
+          "                  [--seconds S]\n");
       return 0;
     } else {
       std::fprintf(stderr, "unknown argument: %s\n", argv[i]);
@@ -125,9 +148,9 @@ int main(int argc, char** argv) {
 
   // Printed so a test harness can wait for readiness instead of sleeping and
   // hoping the threads exist yet.
-  std::printf("pid %d threads %d contention %d%% hold %dus sleep %dus\n",
+  std::printf("pid %d threads %d contention %d%% hold %dus sleep %dus churn %dms\n",
               static_cast<int>(getpid()), opt.threads, opt.contention_pct,
-              opt.hold_us, opt.sleep_us);
+              opt.hold_us, opt.sleep_us, opt.churn_ms);
   std::fflush(stdout);
 
   std::vector<std::thread> workers;
@@ -135,30 +158,27 @@ int main(int argc, char** argv) {
   for (int i = 0; i < opt.threads; ++i) {
     workers.emplace_back(worker_loop, std::cref(opt), i);
   }
-
-  // Name the threads so the folded stacks and the Threads table are readable.
-  // Linux caps thread names at 15 characters plus NUL, so the name is built
-  // wide and then deliberately truncated to fit.
-  for (int i = 0; i < opt.threads; ++i) {
-    char wide[32];
-    char name[16];
-    std::snprintf(wide, sizeof(wide), "worker%d", i);
-    std::strncpy(name, wide, sizeof(name) - 1);
-    name[sizeof(name) - 1] = '\0';
-    pthread_setname_np(workers[i].native_handle(), name);
+  while (g_named_workers.load(std::memory_order_acquire) < opt.threads) {
+    std::this_thread::yield();
   }
 
   std::printf("ready\n");
   std::fflush(stdout);
 
-  if (opt.seconds > 0) {
-    std::this_thread::sleep_for(std::chrono::seconds(opt.seconds));
-    g_running.store(false, std::memory_order_relaxed);
-  } else {
-    while (g_running.load(std::memory_order_relaxed)) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  const auto started_at = std::chrono::steady_clock::now();
+  auto next_churn = started_at;
+  while (opt.seconds == 0 ||
+         std::chrono::steady_clock::now() - started_at <
+             std::chrono::seconds(opt.seconds)) {
+    const auto now = std::chrono::steady_clock::now();
+    if (opt.churn_ms > 0 && now >= next_churn) {
+      std::thread transient(short_lived_worker);
+      transient.join();
+      next_churn = now + std::chrono::milliseconds(opt.churn_ms);
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
   }
+  g_running.store(false, std::memory_order_relaxed);
 
   for (auto& worker : workers) {
     worker.join();

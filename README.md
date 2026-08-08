@@ -165,6 +165,22 @@ flags
 schema: OK (11 file(s) validated against ./schema)
 ```
 
+## Docker Compose demo
+
+To run Performer against the repository's mutex-contention sample in two
+containers and write a validated bundle to `runs/`:
+
+```console
+$ make docker-demo
+```
+
+The target and privileged collector share the Docker host's PID namespace so
+the PID observed by `/proc` matches the one emitted by kernel trace events.
+For an image/output smoke test on a machine that cannot load eBPF programs,
+use `make docker-fake`. Configuration knobs, kernel requirements and the
+manual Compose flow are documented in
+[`docs/docker-demo.md`](docs/docker-demo.md).
+
 `fake-run` writes a synthetic bundle: invented numbers with the shape of a real
 measurement (315 threads, one dominant futex address, a timer thread at the
 centre of the wakeup graph). It exists so the viewer and the diff algorithm can

@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.DS_Store
+*.dSYM/
 
 # Collected and synthetic run bundles are outputs, never sources.
 /runs/

@@ -16,6 +16,7 @@ $ ./collector/bin/performer collect --pid $! --duration 30 --label contended
 | `--hold-us U` | microseconds held inside that critical section |
 | `--sleep-us U` | microseconds slept per iteration (off-CPU / timer pressure) |
 | `--work N` | units of pure user-space CPU per iteration |
+| `--churn-ms N` | create a short-lived thread every N milliseconds; 0 disables it |
 | `--seconds S` | run time; 0 means run until killed |
 
 Two configurations matter most:

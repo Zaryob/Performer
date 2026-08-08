@@ -1,0 +1,11 @@
+.git
+.omc
+.DS_Store
+*.dSYM/
+__pycache__/
+*.py[cod]
+*.tgz
+runs/
+tests/target/contention
+viewer/node_modules/
+viewer/.vite/
