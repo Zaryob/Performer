@@ -9,3 +9,4 @@ runs/
 tests/target/contention
 viewer/node_modules/
 viewer/.vite/
+viewer/dist/

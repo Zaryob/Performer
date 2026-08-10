@@ -12,6 +12,14 @@ $ node verify.mjs ../runs/performer-*.tgz   # end to end, in a real browser
 Then open `dist/index.html` by double clicking it. That is the whole
 deployment: the analysis machine needs a browser and nothing else.
 
+To run the same self-contained page in Docker instead, from the repository
+root run `make docker-viewer`. This builds `performer-viewer:local` from source
+and serves it at `http://127.0.0.1:8080/` (override the host port with
+`PERFORMER_VIEWER_PORT`). `make docker-viewer-image` builds without starting a
+container; `make docker-viewer-down` stops it. The running image contains no
+Node.js or backend; bundles still enter through the browser's file picker or
+drag-and-drop.
+
 ## Constraints that shaped it
 
 **It must work from `file://`.** Not a preference — the analysis machine is

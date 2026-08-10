@@ -223,12 +223,15 @@ Bundles are accepted as either a `.tgz` or an unpacked run directory.
 
 ```console
 $ open viewer/dist/index.html      # or just double click it
+$ make docker-viewer               # alternatively, build and serve the viewer locally
 ```
 
-That is the entire deployment. `dist/index.html` is one self-contained file —
-no server, no toolchain, no network — and bundles are read in the browser
-through the file picker or by dropping them on the page. Nothing is uploaded,
-because there is nowhere to upload to.
+`dist/index.html` is one self-contained file — no server, no toolchain, no
+network — and bundles are read in the browser through the file picker or by
+dropping them on the page. The Docker option builds that same page into
+`performer-viewer:local` and serves it only on `127.0.0.1:8080`; the container
+does not receive or store bundles. Building the image may need network access
+to fetch its base images and npm packages, but the running viewer does not.
 
 On the *target* machine there is a second mode, described under
 [Collecting from the browser](#collecting-from-the-browser) below: the same

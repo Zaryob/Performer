@@ -3,7 +3,7 @@ PYTHON ?= python3
 CLI    := ./collector/bin/performer
 RUNS   ?= ./runs
 
-.PHONY: help test check target fake profiles inspect viewer docker-demo docker-fake docker-down clean
+.PHONY: help test check target fake profiles inspect viewer docker-demo docker-fake docker-viewer-image docker-viewer docker-viewer-down docker-down clean
 
 help:
 	@echo "make test     run the test suite (no dependencies)"
@@ -16,6 +16,9 @@ help:
 	@echo "make viewer   build viewer/dist/index.html (needs npm)"
 	@echo "make docker-demo  profile the sample target with Docker Compose"
 	@echo "make docker-fake  generate a synthetic bundle in the collector image"
+	@echo "make docker-viewer-image  build the offline viewer image"
+	@echo "make docker-viewer  build and serve the viewer on localhost"
+	@echo "make docker-viewer-down  stop the local viewer"
 	@echo "make docker-down  remove stopped demo containers and network"
 	@echo "make clean    remove $(RUNS) and __pycache__"
 
@@ -62,6 +65,16 @@ docker-fake:
 	DOCKER_UID=$$(id -u) DOCKER_GID=$$(id -g) PERFORMER_RUNS_DIR=$(abspath $(RUNS)) docker compose run --build --rm --no-deps synthetic
 	@bundle=$$(ls -t $(RUNS)/performer-*-docker-synthetic.tgz | head -n 1); \
 		$(CLI) validate --verify-hashes "$$bundle"
+
+docker-viewer-image:
+	docker compose --profile viewer build viewer
+
+docker-viewer: docker-viewer-image
+	docker compose --profile viewer up -d --no-build viewer
+	@echo "Viewer: http://127.0.0.1:$${PERFORMER_VIEWER_PORT:-8080}/"
+
+docker-viewer-down:
+	docker compose --profile viewer stop viewer
 
 docker-down:
 	docker compose down --remove-orphans

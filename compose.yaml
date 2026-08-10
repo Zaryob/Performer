@@ -73,5 +73,17 @@ services:
     volumes:
       - "${PERFORMER_RUNS_DIR:-./runs}:/runs"
 
+  viewer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.viewer
+    image: performer-viewer:local
+    profiles: ["viewer"]
+    ports:
+      - "127.0.0.1:${PERFORMER_VIEWER_PORT:-8080}:8080"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
 volumes:
   coordination:

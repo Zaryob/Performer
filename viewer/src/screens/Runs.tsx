@@ -70,8 +70,7 @@ export function Runs({ bundles, selected, onSelect, onAdd, onRemove }: RunsProps
           </button>
         </p>
         <p className="mt-2 text-xs text-slate-500">
-          Everything is read in this browser. Nothing is uploaded — the viewer has
-          no server to upload to.
+          Everything is read in this browser. Run bundles are never uploaded.
         </p>
         <input
           ref={inputRef}
