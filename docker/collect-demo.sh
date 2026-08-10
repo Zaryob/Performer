@@ -6,7 +6,7 @@ expected_workers=${EXPECTED_WORKERS:-16}
 wait_timeout=${TARGET_WAIT_TIMEOUT:-30}
 duration=${COLLECT_DURATION:-10}
 label=${PERFORMER_LABEL:-docker-demo}
-profile=${PERFORMER_PROFILE:-light}
+profile=${PERFORMER_PROFILE:-standard}
 performer=/opt/performer/collector/bin/performer
 
 target_pid=

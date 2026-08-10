@@ -42,7 +42,7 @@ services:
       COLLECT_DURATION: "${COLLECT_DURATION:-10}"
       EXPECTED_WORKERS: "${DEMO_THREADS:-16}"
       PERFORMER_LABEL: "${PERFORMER_LABEL:-docker-demo}"
-      PERFORMER_PROFILE: "${PERFORMER_PROFILE:-light}"
+      PERFORMER_PROFILE: "${PERFORMER_PROFILE:-standard}"
       TARGET_PID_FILE: /coord/target.pid
     ulimits:
       nofile:

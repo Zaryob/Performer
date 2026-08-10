@@ -152,6 +152,52 @@ describe("analyseLocks", () => {
   it("returns null when the run has no futex data at all", () => {
     expect(analyseLocks(bundle({}))).toBeNull();
   });
+
+  it("merges legacy duplicate paths and ranks the actual calling function", () => {
+    const stackA = "worker_loop();hold_shared_lock(int);___pthread_mutex_lock;__lll_lock_wait";
+    const stackB = "other_worker();hold_shared_lock(int);__pthread_mutex_lock;__lll_lock_wait";
+    const data = {
+      [PATHS.futexByAddr]: table(
+        "futex_by_addr", ["addr", "total_us", "calls", "avg_us"],
+        [[HOT, 12_000_000, 120, 100_000]],
+      ),
+      [PATHS.futexSites]: table(
+        "futex_sites", ["addr", "stack", "total_us", "calls", "avg_us"],
+        [
+          [HOT, stackA, 4_000_000, 40, 100_000],
+          [HOT, stackA, 3_000_000, 30, 100_000],
+          [HOT, stackB, 5_000_000, 50, 100_000],
+        ],
+      ),
+    };
+    const measured = bundle(data, {
+      duration_s: 10,
+      target: { pid: 1, comm: "app", thread_count_start: 2, thread_count_end: 2 },
+    });
+    const lock = analyseLocks(measured)!.locks[0]!;
+    expect(lock.sites).toHaveLength(2);
+    expect(lock.sites[0]!.totalUs).toBe(7_000_000);
+    expect(lock.sites[0]!.calls).toBe(70);
+    expect(lock.functions).toEqual([
+      { name: "hold_shared_lock(int)", totalUs: 12_000_000, calls: 120, paths: 2 },
+    ]);
+    const finding = verdict(measured);
+    expect(finding.headline).toContain("hold_shared_lock(int)");
+    expect(finding.evidence.join(" ")).toContain("100% of that address's wait");
+  });
+
+  it("omits inflated per-path counts from an older bundle", () => {
+    const stack = "worker_loop();hold_shared_lock();___pthread_mutex_lock;__lll_lock_wait";
+    const lock = analyseLocks(bundle({
+      [PATHS.futexByAddr]: table("futex_by_addr", ["addr", "total_us", "calls"],
+        [[HOT, 500, 5]]),
+      [PATHS.futexSites]: table("futex_sites", ["addr", "stack", "total_us", "calls"],
+        [[HOT, stack, 200, 5], [HOT, stack, 300, 5]]),
+    }))!.locks[0]!;
+    expect(lock.sites[0]!.totalUs).toBe(500);
+    expect(lock.sites[0]!.calls).toBeNull();
+    expect(lock.functions[0]!.name).toBe("hold_shared_lock()");
+  });
 });
 
 describe("blameFrame", () => {
@@ -167,8 +213,13 @@ describe("blameFrame", () => {
     ).toBe("Queue::pop()");
   });
 
-  it("falls back to the leaf when every frame is glibc", () => {
-    expect(blameFrame("pthread_mutex_lock;__lll_lock_wait")).toBe("__lll_lock_wait");
+  it("recognises glibc aliases and symbol versions", () => {
+    expect(blameFrame("worker();hold_shared_lock();__GI___pthread_mutex_lock@@GLIBC_2.34;__lll_lock_wait"))
+      .toBe("hold_shared_lock()");
+  });
+
+  it("does not invent an application caller when only runtime frames resolve", () => {
+    expect(blameFrame("pthread_mutex_lock;__lll_lock_wait")).toBeNull();
   });
 });
 

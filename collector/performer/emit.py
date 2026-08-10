@@ -311,25 +311,35 @@ def _emit_futex_sites(context: EmitContext, text: str) -> Optional[str]:
     entries = dump.entries("futex_site")
     if not entries:
         return None
-    counts = {
-        (_scalar(entry), _folded_key(entry, context)): entry.value
-        for entry in dump.entries("futex_site_cnt")
-    }
+    # bpftrace can assign different stack IDs to stacks that resolve to the
+    # same symbols.  Once symbolised, those are one call path.  Sum both maps
+    # by the displayed path before joining them; a dict comprehension would
+    # keep only the last count and inflate every per-site average.
+    counts: Dict[tuple, int] = {}
+    for entry in dump.entries("futex_site_cnt"):
+        key = (_scalar(entry), _folded_key(entry, context))
+        if None not in key:
+            counts[key] = counts.get(key, 0) + entry.value
 
-    rows: List[List[Any]] = []
+    totals: Dict[tuple, int] = {}
     for entry in entries:
         addr = _scalar(entry)
         stack = _folded_key(entry, context)
         if addr is None or stack is None:
             continue
+        key = (addr, stack)
+        totals[key] = totals.get(key, 0) + entry.value
+
+    rows: List[List[Any]] = []
+    for (addr, stack), total_us in totals.items():
         calls = counts.get((addr, stack), 0)
         rows.append(
             [
                 _hex_addr(addr),
                 stack,
-                entry.value,
+                total_us,
                 calls,
-                round(entry.value / calls, 2) if calls else None,
+                round(total_us / calls, 2) if calls else None,
             ]
         )
     if not rows:

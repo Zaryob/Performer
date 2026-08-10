@@ -13,7 +13,7 @@ $ make docker-demo
 ```
 
 This builds both images, starts 16 contending worker threads, collects the
-`light` profile for 10 seconds, validates the archive and stops the target.
+`standard` profile for 10 seconds, validates the archive and stops the target.
 The bundle can then be opened in `viewer/dist/index.html`.
 
 The useful knobs are Compose environment variables:
@@ -31,7 +31,7 @@ $ DEMO_THREADS=64 COLLECT_DURATION=20 PERFORMER_PROFILE=standard make docker-dem
 | `DEMO_WORK` | `200` | CPU work for non-contending iterations |
 | `DEMO_CHURN_MS` | `250` | interval between short-lived demo threads |
 | `COLLECT_DURATION` | `10` | measured seconds, excluding preflight |
-| `PERFORMER_PROFILE` | `light` | `light`, `standard` or `deep` |
+| `PERFORMER_PROFILE` | `standard` | `light`, `standard` or `deep` |
 | `PERFORMER_LABEL` | `docker-demo` | bundle label |
 | `PERFORMER_RUNS_DIR` | `./runs` | host output directory |
 

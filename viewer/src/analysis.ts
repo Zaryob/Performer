@@ -32,8 +32,17 @@ export interface LockSite {
   /** Call path that waited, root first, `;` separated. */
   stack: string;
   totalUs: number;
-  calls: number;
+  /** Null when an older bundle's duplicate rows have inconsistent counts. */
+  calls: number | null;
   avgUs: number | null;
+}
+
+export interface LockFunction {
+  /** The caller above the runtime's locking functions, when resolved. */
+  name: string | null;
+  totalUs: number;
+  calls: number | null;
+  paths: number;
 }
 
 export interface Lock {
@@ -46,6 +55,8 @@ export interface Lock {
   share: number;
   /** Call paths that waited on this address, worst first. */
   sites: LockSite[];
+  /** Call paths grouped by the application function that took the lock. */
+  functions: LockFunction[];
 }
 
 export interface LockAnalysis {
@@ -79,6 +90,7 @@ export function analyseLocks(bundle: Bundle): LockAnalysis | null {
   if (!byAddr && !sites) return null;
 
   const grouped = new Map<string, Lock>();
+  const addressesWithTotals = new Set<string>();
   let totalUs = 0;
 
   if (byAddr) {
@@ -88,6 +100,7 @@ export function analyseLocks(bundle: Bundle): LockAnalysis | null {
     const iAvg = column(byAddr, "avg_us");
     for (const row of byAddr.rows) {
       const addr = String(row[iAddr] ?? "?");
+      addressesWithTotals.add(addr);
       const total = num(row[iTotal]);
       grouped.set(addr, {
         addr,
@@ -96,6 +109,7 @@ export function analyseLocks(bundle: Bundle): LockAnalysis | null {
         avgUs: iAvg >= 0 ? num(row[iAvg]) : null,
         share: 0,
         sites: [],
+        functions: [],
       });
       totalUs += total;
     }
@@ -106,7 +120,7 @@ export function analyseLocks(bundle: Bundle): LockAnalysis | null {
     const iStack = column(sites, "stack");
     const iTotal = column(sites, "total_us");
     const iCalls = column(sites, "calls");
-    const iAvg = column(sites, "avg_us");
+    const paths = new Map<Lock, Map<string, LockSite>>();
     for (const row of sites.rows) {
       const addr = String(row[iAddr] ?? "?");
       const total = num(row[iTotal]);
@@ -114,24 +128,61 @@ export function analyseLocks(bundle: Bundle): LockAnalysis | null {
       if (!lock) {
         // A bundle with sites but no address table: still usable, and the
         // totals come out of the sites themselves.
-        lock = { addr, totalUs: 0, calls: 0, avgUs: null, share: 0, sites: [] };
+        lock = { addr, totalUs: 0, calls: 0, avgUs: null, share: 0, sites: [], functions: [] };
         grouped.set(addr, lock);
-        totalUs += total;
-        lock.totalUs = total;
       }
-      lock.sites.push({
-        stack: String(row[iStack] ?? ""),
-        totalUs: total,
-        calls: num(row[iCalls]),
-        avgUs: iAvg >= 0 ? num(row[iAvg]) : null,
-      });
+      const calls = num(row[iCalls]);
+      if (!addressesWithTotals.has(addr)) {
+        lock.totalUs += total;
+        lock.calls += calls;
+        totalUs += total;
+      }
+      const stack = String(row[iStack] ?? "");
+      const byPath = paths.get(lock) ?? new Map<string, LockSite>();
+      const site = byPath.get(stack) ?? { stack, totalUs: 0, calls: 0, avgUs: null };
+      site.totalUs += total;
+      site.calls = (site.calls ?? 0) + calls;
+      byPath.set(stack, site);
+      paths.set(lock, byPath);
+    }
+    for (const [lock, byPath] of paths) {
+      lock.sites = [...byPath.values()];
+      for (const site of lock.sites) {
+        site.avgUs = site.calls !== null && site.calls > 0
+          ? site.totalUs / site.calls
+          : null;
+      }
     }
   }
 
   const locks = [...grouped.values()];
   for (const lock of locks) {
+    if (!addressesWithTotals.has(lock.addr)) {
+      lock.avgUs = lock.calls > 0 ? lock.totalUs / lock.calls : null;
+    }
     lock.share = totalUs > 0 ? lock.totalUs / totalUs : 0;
     lock.sites.sort((a, b) => b.totalUs - a.totalUs);
+    // Older collectors reused the last count for every stack ID that
+    // symbolised to the same path. Wait totals are still additive, but those
+    // repeated counts are not. Keep the function attribution and hide the
+    // per-path call counts when they exceed the address's authoritative count.
+    if (addressesWithTotals.has(lock.addr) &&
+        lock.sites.reduce((sum, site) => sum + (site.calls ?? 0), 0) > lock.calls) {
+      for (const site of lock.sites) {
+        site.calls = null;
+        site.avgUs = null;
+      }
+    }
+    const byFunction = new Map<string | null, LockFunction>();
+    for (const site of lock.sites) {
+      const name = blameFrame(site.stack);
+      const fn = byFunction.get(name) ?? { name, totalUs: 0, calls: 0, paths: 0 };
+      fn.totalUs += site.totalUs;
+      fn.calls = fn.calls === null || site.calls === null ? null : fn.calls + site.calls;
+      fn.paths += 1;
+      byFunction.set(name, fn);
+    }
+    lock.functions = [...byFunction.values()].sort((a, b) => b.totalUs - a.totalUs);
   }
   locks.sort((a, b) => b.totalUs - a.totalUs);
 
@@ -143,14 +194,14 @@ export function analyseLocks(bundle: Bundle): LockAnalysis | null {
   };
 }
 
-/** The frame a developer would recognise: the deepest one that is not glibc. */
-export function blameFrame(stack: string): string {
+/** The application's caller immediately above the runtime's wait functions. */
+export function blameFrame(stack: string): string | null {
   const frames = stack.split(";").filter(Boolean);
   for (let i = frames.length - 1; i >= 0; i -= 1) {
     const frame = frames[i] as string;
-    if (!GLIBC_RE.test(frame)) return frame;
+    if (!RUNTIME_WAIT_RE.test(frame)) return frame;
   }
-  return frames[frames.length - 1] ?? "?";
+  return null;
 }
 
 /**
@@ -159,8 +210,8 @@ export function blameFrame(stack: string): string {
  * `__lll_lock_wait` is where every contended mutex ends up, so naming it as
  * the culprit is true and useless. The caller above it is the answer.
  */
-const GLIBC_RE =
-  /^(__lll_lock_wait|pthread_mutex_lock|pthread_mutex_timedlock|pthread_cond_wait|pthread_cond_timedwait|futex_wait|__futex_abstimed_wait\w*|syscall|__syscall\w*|\[unknown\])$/;
+const RUNTIME_WAIT_RE =
+  /^(?:(?:__GI_)?_*(?:lll_lock_wait|lll_lock_wake|pthread_mutex_lock|pthread_mutex_timedlock|pthread_mutex_unlock(?:_usercnt)?|pthread_cond_wait|pthread_cond_timedwait|pthread_clockjoin_ex|futex(?:_\w+)?|syscall(?:_\w+)?)(?:@{1,2}(?:GLIBC_[\d.]+|plt))?|\[unknown\])$/;
 
 // -- wakeups ----------------------------------------------------------------
 
@@ -334,16 +385,16 @@ export function verdict(bundle: Bundle): Verdict {
     const threads = Math.max(1, manifest.target.thread_count_start);
     const waitPerThread = worst.totalUs / 1e6 / threads / seconds;
     if (worst.share >= VERDICT.lockShare && waitPerThread >= VERDICT.lockOfWallclock) {
-      const site = worst.sites[0];
-      const blame = site ? blameFrame(site.stack) : null;
+      const topFunction = worst.functions[0];
+      const blame = topFunction?.name ?? null;
       const evidence = [
         `${(worst.share * 100).toFixed(0)}% of all futex wait time is on one address (${worst.addr})`,
         `${(worst.totalUs / 1e6).toFixed(1)} s of waiting across ${worst.calls.toLocaleString()} waits` +
           ` — ${(waitPerThread * 100).toFixed(0)}% of each thread's time, on average`,
       ];
-      if (site) {
+      if (topFunction && blame) {
         evidence.push(
-          `${((site.totalUs / worst.totalUs) * 100).toFixed(0)}% of that address's wait comes from ${blame}`,
+          `${((topFunction.totalUs / worst.totalUs) * 100).toFixed(0)}% of that address's wait comes from ${blame}`,
         );
       }
       candidates.push({

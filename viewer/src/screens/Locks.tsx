@@ -38,6 +38,7 @@ export function Locks({ bundle }: { bundle: Bundle }) {
   const seconds = runDuration(bundle.manifest);
   const threads = Math.max(1, bundle.manifest.target.thread_count_start);
   const worst = analysis.locks[0] as Lock;
+  const topFunction = worst.functions[0];
   const single = worst.share >= 0.5;
 
   return (
@@ -52,15 +53,15 @@ export function Locks({ bundle }: { bundle: Bundle }) {
                 {(worst.share * 100).toFixed(0)}%
               </span>{" "}
               of all futex wait time in this run
-              {worst.sites.length > 0 && (
+              {topFunction?.name && (
                 <>
                   , and{" "}
                   <span className="text-slate-100 tabular-nums">
-                    {(((worst.sites[0] as { totalUs: number }).totalUs / worst.totalUs) * 100).toFixed(0)}%
+                    {((topFunction.totalUs / worst.totalUs) * 100).toFixed(0)}%
                   </span>{" "}
                   of that comes from{" "}
                   <code className="text-slate-100">
-                    {blameFrame((worst.sites[0] as { stack: string }).stack)}
+                    {topFunction.name}
                   </code>
                 </>
               )}
@@ -93,6 +94,9 @@ export function Locks({ bundle }: { bundle: Bundle }) {
           )}
           {analysis.truncated && (
             <> The table was truncated, so "no other lock matters" is unknown here, not established.</>
+          )}
+          {analysis.locks.some((lock) => lock.sites.some((site) => site.calls === null)) && (
+            <> Some older bundle call counts disagree with their address totals; those per-path counts are omitted.</>
           )}
         </p>
       </Panel>
@@ -153,6 +157,7 @@ function LockRows({
   onToggle: () => void;
 }) {
   const top = lock.sites[0];
+  const topFunction = lock.functions[0];
   const expandable = lock.sites.length > 0;
   return (
     <>
@@ -173,13 +178,13 @@ function LockRows({
         <td className="max-w-0 py-1 pr-3" title={top?.stack.replace(/;/g, " → ")}>
           <span className="flex items-baseline gap-2">
             <span className="truncate font-mono text-slate-100">
-              {top ? blameFrame(top.stack) : <span className="text-slate-600">—</span>}
+              {topFunction?.name ?? (top ? "caller unresolved" : <span className="text-slate-600">—</span>)}
             </span>
-            {lock.sites.length > 1 && (
+            {lock.functions.length > 1 && (
               // Outside the truncation: "+2 more" is the shortest thing on the
               // row and the one that says the answer is not the whole answer.
               <span className="shrink-0 text-xs text-slate-500">
-                +{lock.sites.length - 1} more
+                +{lock.functions.length - 1} other functions
               </span>
             )}
           </span>
@@ -205,7 +210,7 @@ function LockRows({
           <tr key={site.stack} className="bg-slate-950/60 text-xs">
             <td />
             <td className="py-1 pr-3" colSpan={2}>
-              <div className="font-mono text-slate-200">{blameFrame(site.stack)}</div>
+              <div className="font-mono text-slate-200">{blameFrame(site.stack) ?? "caller unresolved"}</div>
               <div className="break-all text-slate-500">
                 {site.stack.replace(/;/g, " → ")}
               </div>
@@ -217,7 +222,7 @@ function LockRows({
               {((site.totalUs / lock.totalUs) * 100).toFixed(0)}% of this lock
             </td>
             <td className="py-1 pr-3 text-right tabular-nums text-slate-500">
-              {site.calls.toLocaleString()}
+              {site.calls?.toLocaleString() ?? "—"}
             </td>
             <td className="py-1 text-right tabular-nums text-slate-500">
               {site.avgUs !== null ? `${site.avgUs.toFixed(0)} µs` : "—"}

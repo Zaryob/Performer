@@ -176,6 +176,26 @@ class FutexTests(EmitterTestCase):
         for addr, total in summed.items():
             self.assertLessEqual(total, by_addr[addr], f"{addr} sites exceed its total")
 
+    def test_symbolised_duplicate_stacks_are_one_site_with_summed_counts(self):
+        # Distinct bpftrace stack IDs can print the same symbols with different
+        # offsets. The displayed site and its call count must be aggregated.
+        stack = (
+            "    __lll_lock_wait+{offset}\n"
+            "    ___pthread_mutex_lock+20\n"
+            "    hold_shared_lock(int)+30\n"
+            "    worker_loop()+40\n"
+        )
+        text = (
+            "@futex_site[123,\n" + stack.format(offset=1) + "]: 200\n"
+            "@futex_site[123,\n" + stack.format(offset=2) + "]: 300\n"
+            "@futex_site_cnt[123,\n" + stack.format(offset=1) + "]: 2\n"
+            "@futex_site_cnt[123,\n" + stack.format(offset=2) + "]: 3\n"
+        )
+        self.run_emitter("futex", text)
+        rows = self.read(layout.HIST_FUTEX_SITES)["rows"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][2:], [500, 5, 100.0])
+
     def test_the_hist_parser_stays_quiet_about_the_joined_map(self):
         # A single probe prints stack keyed and scalar keyed maps into one
         # stream.  @futex_site[<addr>, <stack>] opens with a scalar, which is
