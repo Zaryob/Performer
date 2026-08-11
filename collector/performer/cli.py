@@ -74,7 +74,7 @@ def _build_parser() -> argparse.ArgumentParser:
     collect.add_argument(
         "--force",
         action="store_true",
-        help="override the profile's duration limit and failed probe smoke tests",
+        help="override the profile's duration limit",
     )
     collect.add_argument(
         "--overhead-window",

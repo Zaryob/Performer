@@ -114,8 +114,9 @@ class FullPreflightTests(unittest.TestCase):
             report = preflight.run_preflight(target.pid, PROFILE, **FAST)
         self.assertFalse(report.smoke["oncpu"])
         self.assertEqual(report.usable_probes, [])
+        self.assertFalse(report.ok)
         check = report.get("smoke:oncpu")
-        self.assertEqual(check.status, preflight.FAIL)  # oncpu is a required probe
+        self.assertEqual(check.status, preflight.WARN)
         self.assertIn("printed no map data", check.message)
         self.assertIn("recorded as failed", check.message)
 
@@ -123,8 +124,9 @@ class FullPreflightTests(unittest.TestCase):
         with spawn_target(threads=4, seconds=30) as target, fake_bpftrace("startup_error"):
             report = preflight.run_preflight(target.pid, PROFILE, **FAST)
         self.assertFalse(report.smoke["oncpu"])
-        self.assertEqual(report.get("frame_pointers").status, preflight.FAIL)
+        self.assertEqual(report.get("frame_pointers").status, preflight.WARN)
         self.assertIn("ERROR", str(report.get("smoke:oncpu").details.get("stderr", "")))
+        self.assertIn("Invalid provider", preflight.render(report))
 
     def test_trials_are_skipped_without_bpftrace(self):
         original = os.environ.get("PATH", "")

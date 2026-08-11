@@ -112,9 +112,21 @@ def collect(
             + _override_hint(blocking)
         )
     if not report.usable_probes:
+        causes = []
+        for check in report.checks:
+            if not check.name.startswith("smoke:"):
+                continue
+            cause = preflight_mod.trial_error(check)
+            if cause and cause not in [message for _name, message in causes]:
+                causes.append((check.name, cause))
+        if causes:
+            detail = f" First probe error ({causes[0][0]}): {causes[0][1]}"
+        else:
+            first = next((c for c in report.checks if c.name.startswith("smoke:")), None)
+            detail = f" {first.name}: {first.message}" if first else ""
         raise PreflightError(
-            "no probe survived its smoke test; there is nothing to collect. "
-            "See the messages above."
+            "no probe survived its smoke test; there is nothing to collect."
+            + detail
         )
 
     # ---- set up the bundle ------------------------------------------
@@ -306,15 +318,15 @@ def _blocking_failures(
 ) -> List[preflight_mod.Check]:
     """Which preflight failures actually stop the run.
 
-    ``--ignore-quality`` waives the frame pointer verdict and nothing else:
-    the operator can decide that unusable stacks are acceptable, but cannot
-    decide that bpftrace is installed.
+    Missing dependencies and known unusable stacks stop collection. Failed
+    smoke tests are warnings: probes that passed can still produce a partial
+    bundle without an override flag.
     """
     blocking = []
     for check in report.failures:
         if check.name == "frame_pointers" and options.ignore_quality:
             continue
-        if check.name.startswith("smoke:") and options.force:
+        if check.name.startswith("smoke:"):
             continue
         blocking.append(check)
     return blocking
@@ -324,8 +336,6 @@ def _override_hint(blocking: Sequence[preflight_mod.Check]) -> str:
     names = {c.name for c in blocking}
     if "frame_pointers" in names:
         return "\n\nPass --ignore-quality to collect anyway (the stacks will be unusable)."
-    if any(n.startswith("smoke:") for n in names):
-        return "\n\nPass --force to collect with the failing probes disabled."
     return ""
 
 
@@ -509,6 +519,9 @@ def _build_quality(
     cpu_after: Optional[Dict[str, Any]] = None,
 ) -> manifest_mod.Quality:
     notes: List[str] = []
+    frame_check = report.get("frame_pointers")
+    if frame_check and frame_check.status == preflight_mod.WARN and not report.total_frame_samples:
+        notes.append("stack quality could not be measured during preflight")
     if options.ignore_quality:
         notes.append("frame pointer check overridden with --ignore-quality")
     if baseline_pct is None or during_pct is None:

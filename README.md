@@ -106,7 +106,13 @@ at the same instant, so the window the manifest records is the window they all
 actually covered — otherwise the first probe would trace seconds the last one
 missed.
 
-Preflight refuses to start a measurement that cannot produce a usable answer.
+Preflight reports probe startup failures as warnings and collects with the
+probes that passed. The bundle is marked partial and records failed probes.
+If every probe fails, collection stops and prints the first probe error;
+there is no measurement to save. Trial errors appear directly in the preflight
+output because its temporary stderr files are removed afterward.
+
+Preflight refuses to start a measurement with known unusable stacks.
 Above 30% unresolved frames it stops and tells you to rebuild with
 `-fno-omit-frame-pointer`; `--ignore-quality` overrides that and marks the
 bundle accordingly. A probe that fails its two-second smoke test is recorded as

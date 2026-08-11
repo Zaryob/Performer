@@ -225,6 +225,28 @@ class DegradedCollectTests(unittest.TestCase):
                 collect(self._options(target.pid), printer=quiet)
         self.assertIn("smoke:oncpu", str(ctx.exception))
 
+    def test_all_startup_failures_show_the_probe_error(self):
+        with spawn_target(threads=8, seconds=60) as target, fake_bpftrace("startup_error"):
+            with self.assertRaises(PreflightError) as ctx:
+                collect(self._options(target.pid), printer=quiet)
+        self.assertIn("no probe survived", str(ctx.exception))
+        self.assertIn("Invalid provider", str(ctx.exception))
+
+    def test_failed_oncpu_is_warning_when_other_probes_work(self):
+        with spawn_target(threads=8, seconds=60) as target, fake_bpftrace("oncpu_startup_error"):
+            result = collect(
+                self._options(target.pid, profile_name="standard"), printer=quiet
+            )
+        self.assertEqual(result.manifest["status"], "partial")
+        self.assertEqual(result.preflight.get("frame_pointers").status, "warn")
+        self.assertEqual(result.preflight.get("smoke:oncpu").status, "warn")
+        self.assertFalse(result.preflight.smoke["oncpu"])
+        self.assertTrue(result.preflight.smoke["futex"])
+        with Bundle.open(result.archive) as bundle:
+            self.assertTrue(bundle.validate().ok)
+            self.assertFalse(bundle.exists(layout.STACK_ONCPU))
+            self.assertTrue(bundle.exists(layout.HIST_FUTEX_BY_ADDR))
+
     def test_missing_bpftrace_is_refused_before_anything_is_written(self):
         import os
 

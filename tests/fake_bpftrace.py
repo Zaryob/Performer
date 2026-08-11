@@ -16,6 +16,7 @@ ones that are awkward to get right:
 
     normal          attach, wait, dump maps on SIGINT              (default)
     startup_error   fail to attach, like a bad tracepoint
+    oncpu_startup_error  only the on-CPU probe fails to attach
     silent          attach, but produce no map output at all
     ignore_sigint   ignore SIGINT, forcing the SIGTERM escalation
     stubborn        ignore SIGINT and SIGTERM, forcing SIGKILL
@@ -244,13 +245,14 @@ def main(argv: list) -> int:
     mode = os.environ.get("FAKE_BPFTRACE_MODE", "normal")
     comm = os.environ.get("FAKE_BPFTRACE_COMM", "target")
 
-    if mode == "startup_error":
+    positional = [a for a in argv[1:] if not a.startswith("-")]
+    program = os.path.basename(positional[0]) if positional else ""
+
+    if mode == "startup_error" or (mode == "oncpu_startup_error" and program == "oncpu.bt"):
         # bpftrace reports attach failures on stderr and exits immediately.
         print("stdin:1:1-20: ERROR: Invalid provider: 'nosuchprobe'", file=sys.stderr)
         return 1
 
-    positional = [a for a in argv[1:] if not a.startswith("-")]
-    program = os.path.basename(positional[0]) if positional else ""
     watchdog = 3600.0
     if len(positional) >= 3:
         try:

@@ -110,7 +110,10 @@ class PreflightReport:
 
     @property
     def ok(self) -> bool:
-        return not self.failures
+        if self.failures:
+            return False
+        attempted = [c for c in self.checks if c.name.startswith("smoke:") and c.status != SKIP]
+        return not attempted or bool(self.usable_probes)
 
     @property
     def usable_probes(self) -> List[str]:
@@ -381,9 +384,9 @@ def check_frame_pointers(report: PreflightReport, pid: int, **kwargs) -> Check:
     if not trial.ran:
         return Check(
             "frame_pointers",
-            FAIL,
+            WARN,
             "the trial oncpu probe did not start, so stack quality is unknown",
-            hint="Read the probe's stderr; usually a missing tracepoint or kernel config.",
+            hint="Stack quality could not be measured; see the probe error below.",
             details={"exit_reason": trial.exit_reason, "stderr": trial.stderr[-400:]},
         )
     if trial.stats.total_samples == 0:
@@ -451,7 +454,6 @@ def check_smoke(report: PreflightReport, profile: Profile, pid: int, **kwargs) -
                 )
             )
             continue
-        status = FAIL if spec.required else WARN
         reason = (
             "did not start"
             if not trial.ran
@@ -460,9 +462,9 @@ def check_smoke(report: PreflightReport, profile: Profile, pid: int, **kwargs) -
         checks.append(
             Check(
                 f"smoke:{spec.name}",
-                status,
+                WARN,
                 f"probe '{spec.name}' {reason}; it will be recorded as failed",
-                hint="Check raw/<probe>.stderr.log; tracepoints differ between kernels.",
+                hint="Collection can use the other probes if any passed.",
                 details={"exit_reason": trial.exit_reason, "stderr": trial.stderr[-400:]},
             )
         )
@@ -563,8 +565,27 @@ def run_preflight(
 def render(report: PreflightReport) -> str:
     mark = {PASS: "[ok]", WARN: "[!]", FAIL: "[X]", SKIP: "[-]"}
     lines = ["preflight"]
+    shown_errors = set()
     for check in report.checks:
         lines.append(f"  {mark[check.status]} {check.name:<22} {check.message}")
         if check.hint and check.status in (FAIL, WARN):
             lines.append(f"       -> {check.hint}")
+        if check.status in (FAIL, WARN):
+            cause = trial_error(check)
+            if cause and cause not in shown_errors:
+                lines.append(f"       cause: {cause}")
+                shown_errors.add(cause)
     return "\n".join(lines)
+
+
+def trial_error(check: Check) -> Optional[str]:
+    """One useful line from a temporary trial log, which is deleted afterward."""
+    stderr = check.details.get("stderr")
+    if not isinstance(stderr, str):
+        return None
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    errors = [line for line in lines if "error" in line.lower() or "denied" in line.lower()]
+    if errors:
+        return errors[-1][:240]
+    non_warnings = [line for line in lines if not line.lower().startswith("warning")]
+    return non_warnings[-1][:240] if non_warnings else None
