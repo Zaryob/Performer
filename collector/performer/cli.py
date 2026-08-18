@@ -105,6 +105,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     preflight.add_argument("--pid", type=int, required=True)
     preflight.add_argument("--profile", default=profiles.DEFAULT_PROFILE)
+    preflight.add_argument("--bpftrace", default=None, help="path to the bpftrace binary to check")
     preflight.add_argument(
         "--skip-trials",
         action="store_true",
@@ -345,7 +346,7 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
 
     profile = profiles.load(args.profile)
     report = preflight_mod.run_preflight(
-        args.pid, profile, skip_trials=args.skip_trials
+        args.pid, profile, skip_trials=args.skip_trials, bpftrace=args.bpftrace
     )
     if args.json:
         print(json.dumps(report.to_dict(), indent=2))

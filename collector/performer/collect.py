@@ -98,6 +98,7 @@ def collect(
     report = preflight_mod.run_preflight(
         options.pid,
         profile,
+        bpftrace=options.bpftrace,
         overhead_window_s=options.overhead_window_s,
         trial_seconds=options.preflight_trial_s,
         attach_grace_s=options.preflight_attach_grace_s,
@@ -380,7 +381,7 @@ def _launch_probes(
     printer: Printer,
 ) -> List[tuple]:
     """Start every probe that passed its smoke test."""
-    bpftrace = options.bpftrace or report.bpftrace_path or "bpftrace"
+    bpftrace = report.bpftrace_path or "bpftrace"
     watchdog = int((options.duration_s or 0) + 30) if options.duration_s else 86400
     # Every probe is started before any of them is waited on, so they all
     # attach at effectively the same moment and the window the manifest

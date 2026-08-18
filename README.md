@@ -75,6 +75,14 @@ recorded" are very different findings.
 On the target machine, as root, with bpftrace installed (output below is
 illustrative — the numbers come from a real run's shape, not a specific one):
 
+Before checking the target or starting any probe, Performer verifies the
+`bpftrace` executable (including its version) and every `.bt` program used by
+the selected profile. Python 3.8+ is checked by the entry point itself. The
+collector does not require `perf` or `flamegraph.pl`. Missing prerequisites are
+listed together and collection stops without creating a run bundle. Use
+`--bpftrace /path/to/bpftrace` with `collect` or `preflight` when it is not on
+`PATH`; both commands check and run that same binary.
+
 ```console
 $ ./collector/bin/performer collect --pid 205852 --duration 30 \
       --profile standard --label baseline --tag before-timer-fix --out ./runs

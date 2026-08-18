@@ -67,6 +67,14 @@ class CollectTests(unittest.TestCase):
             self.assertTrue(bundle.exists(layout.SERIES_THREADS))
             self.assertTrue(bundle.exists(f"{layout.DIR_RAW}/oncpu.stderr.log"))
 
+    def test_explicit_bpftrace_binary_is_used_for_preflight_and_collection(self):
+        with spawn_target(threads=4, seconds=60) as target, fake_bpftrace("normal") as binary:
+            result = collect(self._options(target.pid, bpftrace=binary), printer=quiet)
+        self.assertEqual(result.preflight.bpftrace_path, binary)
+        self.assertEqual(result.manifest["status"], "ok")
+        with Bundle.open(result.archive) as bundle:
+            self.assertTrue(bundle.validate().ok)
+
     def test_folded_stacks_are_usable(self):
         with spawn_target(threads=8, seconds=60) as target, fake_bpftrace("normal"):
             result = collect(self._options(target.pid), printer=quiet)
@@ -280,6 +288,17 @@ class ArgumentTests(unittest.TestCase):
         options = CollectOptions(pid=1, label="unit", out_dir=self.tmp, duration_s=0)
         with self.assertRaises(PerformerError):
             collect(options, printer=quiet)
+
+    def test_missing_bpftrace_stops_before_target_checks(self):
+        options = CollectOptions(
+            pid=4194303, label="unit", out_dir=self.tmp,
+            bpftrace="/nonexistent/performer-bpftrace",
+        )
+        with self.assertRaises(PreflightError) as ctx:
+            collect(options, printer=quiet)
+        self.assertIn("bpftrace", str(ctx.exception))
+        self.assertNotIn("target", str(ctx.exception))
+        self.assertEqual(list(self.tmp.iterdir()), [])
 
     def test_unknown_profile_is_refused_before_touching_the_target(self):
         options = CollectOptions(

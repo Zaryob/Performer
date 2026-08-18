@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
+from unittest import mock
 
 from performer import preflight, profiles
 
@@ -56,7 +58,28 @@ class IndividualCheckTests(unittest.TestCase):
         finally:
             os.environ["PATH"] = original
         self.assertEqual(check.status, preflight.FAIL)
-        self.assertIn("not on PATH", check.message)
+        self.assertIn("missing or not executable", check.message)
+
+    def test_requested_bpftrace_binary_is_checked(self):
+        with fake_bpftrace(version="0.20.2") as binary:
+            report = preflight.PreflightReport()
+            check = preflight.check_bpftrace(report, binary=binary)
+        self.assertEqual(check.status, preflight.PASS)
+        self.assertEqual(report.bpftrace_path, binary)
+
+    def test_missing_tools_stop_before_target_and_trials(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(
+            os.environ, {"PATH": "/nonexistent", "PERFORMER_PROBES_DIR": directory}
+        ), mock.patch.object(preflight, "check_target") as target, mock.patch.object(
+            preflight, "run_trial"
+        ) as trial:
+            report = preflight.run_preflight(999999, PROFILE)
+        self.assertEqual(report.get("bpftrace").status, preflight.FAIL)
+        self.assertEqual(report.get("probe_programs").status, preflight.FAIL)
+        self.assertEqual(report.get("frame_pointers").status, preflight.SKIP)
+        self.assertIn("oncpu.bt", preflight.render(report))
+        target.assert_not_called()
+        trial.assert_not_called()
 
     def test_nofile_covers_the_estimated_need(self):
         check = preflight.check_nofile(thread_count=1, cpu_count=1)
@@ -88,8 +111,9 @@ class FullPreflightTests(unittest.TestCase):
         self.assertEqual(
             [c.name for c in report.checks],
             [
-                "privileges",
                 "bpftrace",
+                "probe_programs",
+                "privileges",
                 "target",
                 "nofile",
                 "perf_event_paranoid",

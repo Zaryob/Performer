@@ -8,8 +8,8 @@ misleading, because it looks exactly like a real one.
 
 Checks, in order (spec section 6.1):
 
-  1. privileges -- root, or CAP_BPF + CAP_PERFMON
-  2. bpftrace present and >= 0.14
+  1. bpftrace present and >= 0.14, and every profile probe file readable
+  2. privileges -- root, or CAP_BPF + CAP_PERFMON
   3. target pid exists, and how many threads it has
   4. RLIMIT_NOFILE >= threads x cpus x 2, raised in place when possible
   5. kernel.perf_event_paranoid
@@ -153,15 +153,17 @@ def check_privileges() -> Check:
 def check_bpftrace(
     report: PreflightReport,
     *,
+    binary: Optional[str] = None,
     runner: Callable[[Sequence[str]], Tuple[int, str, str]] = None,
 ) -> Check:
-    path = shutil.which("bpftrace")
+    requested = binary or "bpftrace"
+    path = shutil.which(requested)
     if path is None:
         return Check(
             "bpftrace",
             FAIL,
-            "bpftrace is not on PATH",
-            hint="Install bpftrace >= 0.14 on the target machine.",
+            f"bpftrace executable {requested!r} is missing or not executable",
+            hint="Install bpftrace >= 0.14, or pass --bpftrace with an executable path.",
         )
     report.bpftrace_path = path
     run = runner or _run_command
@@ -190,6 +192,29 @@ def check_bpftrace(
         f"bpftrace {report.bpftrace_version} at {path}",
         details={"path": path, "version": report.bpftrace_version},
     )
+
+
+def check_probe_programs(profile: Profile) -> Check:
+    """Check every file before running any of the profile's programs."""
+    directory = profiles.probes_dir()
+    missing = []
+    for spec in profile.probes:
+        path = directory / spec.program
+        try:
+            readable = path.is_file() and bool(path.stat().st_mode & 0o444)
+        except OSError:
+            readable = False
+        if not readable:
+            missing.append(str(path))
+    if missing:
+        return Check(
+            "probe_programs",
+            FAIL,
+            f"{len(missing)} required probe program(s) missing or unreadable",
+            hint="Install the probes/ directory or fix PERFORMER_PROBES_DIR.",
+            details={"missing": missing},
+        )
+    return Check("probe_programs", PASS, f"all {len(profile.probes)} profile probe programs are available")
 
 
 def check_target(report: PreflightReport, pid: int) -> Check:
@@ -518,12 +543,22 @@ def run_preflight(
     overhead_window_s: float = 0.0,
     trial_seconds: float = TRIAL_S,
     attach_grace_s: Optional[float] = None,
+    bpftrace: Optional[str] = None,
 ) -> PreflightReport:
     """Run every check, in order, and stop early only when nothing else can run."""
     report = PreflightReport()
 
+    bpftrace_check = report.add(check_bpftrace(report, binary=bpftrace))
+    programs_check = report.add(check_probe_programs(profile))
+    if bpftrace_check.status == FAIL or programs_check.status == FAIL:
+        reason = "required collection tools are unavailable"
+        report.add(Check("frame_pointers", SKIP, f"not run: {reason}"))
+        for spec in profile.probes:
+            report.smoke[spec.name] = False
+            report.add(Check(f"smoke:{spec.name}", SKIP, f"not run: {reason}"))
+        return report
+
     report.add(check_privileges())
-    bpftrace_check = report.add(check_bpftrace(report))
     target_check = report.add(check_target(report, pid))
 
     if target_check.status == FAIL:
@@ -536,10 +571,8 @@ def run_preflight(
     report.add(check_nofile(report.thread_count, cpus))
     report.add(check_perf_event_paranoid())
 
-    if bpftrace_check.status == FAIL or skip_trials:
-        reason = (
-            "bpftrace is unavailable" if bpftrace_check.status == FAIL else "trials skipped"
-        )
+    if skip_trials:
+        reason = "trials skipped"
         report.add(Check("frame_pointers", SKIP, f"stack quality not measured: {reason}"))
         for spec in profile.probes:
             report.smoke[spec.name] = False
@@ -570,6 +603,9 @@ def render(report: PreflightReport) -> str:
         lines.append(f"  {mark[check.status]} {check.name:<22} {check.message}")
         if check.hint and check.status in (FAIL, WARN):
             lines.append(f"       -> {check.hint}")
+        if check.name == "probe_programs":
+            for path in check.details.get("missing", []):
+                lines.append(f"       missing: {path}")
         if check.status in (FAIL, WARN):
             cause = trial_error(check)
             if cause and cause not in shown_errors:

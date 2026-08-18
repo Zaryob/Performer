@@ -101,6 +101,7 @@ class DaemonTestCase(unittest.TestCase):
         # what it was asked to do so the tests can assert on it.
         self.collect_calls = []
         self.service._collect_fn = self._fake_collect
+        self.service.tool_issues = lambda _profile: []
 
         # Port 0: the OS picks a free one, so the suite never collides with a
         # developer's own daemon or with a parallel test run.
@@ -558,6 +559,14 @@ class CollectTests(DaemonTestCase):
         self.assertEqual(call["label"], "ok")
         self.assertEqual(call["duration_s"], 5)
 
+    def test_missing_tools_reject_before_a_job_is_created(self):
+        self.service.tool_issues = lambda _profile: ["bpftrace executable is missing"]
+        status, body = self.start()
+        self.assertEqual(status, 503)
+        self.assertIn("bpftrace", body["error"])
+        self.assertEqual(self.service.jobs(), [])
+        self.assertEqual(self.collect_calls, [])
+
     def test_the_job_reaches_done_and_names_its_bundle(self):
         _status, job = self.start()
         self.assertTrue(
@@ -647,6 +656,7 @@ class StatusTests(DaemonTestCase):
         # Whether it can actually collect is a fact about privileges, and the
         # browser needs it to explain a failure before it happens.
         self.assertIsInstance(body["can_collect"], bool)
+        self.assertIsInstance(body["tool_issues"], list)
 
     def test_targets_are_read_from_proc_and_never_executed(self):
         target = python_sleeper()

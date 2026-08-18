@@ -30,6 +30,7 @@ export interface DaemonStatus {
   busy: boolean;
   current_job: string | null;
   can_collect: boolean;
+  tool_issues: string[];
   viewer: boolean;
 }
 
@@ -39,6 +40,7 @@ export interface ProfileInfo {
   probes: string[];
   max_duration_s: number;
   expected_overhead: string;
+  tool_issues: string[];
 }
 
 export interface Target {

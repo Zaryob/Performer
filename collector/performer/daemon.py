@@ -46,7 +46,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import __version__, layout, proc, profiles
+from . import __version__, layout, preflight, proc, profiles
 from .bundle import Bundle
 from .errors import PerformerError
 
@@ -300,9 +300,24 @@ class Service:
                     "probes": list(profile.probe_names),
                     "max_duration_s": profile.max_duration_s,
                     "expected_overhead": profile.expected_overhead,
+                    "tool_issues": self._probe_program_issues(profile),
                 }
             )
         return info
+
+    @staticmethod
+    def _probe_program_issues(profile: profiles.Profile) -> List[str]:
+        check = preflight.check_probe_programs(profile)
+        if check.status == preflight.PASS:
+            return []
+        missing = check.details.get("missing", [])
+        return [f"missing probe program: {path}" for path in missing]
+
+    def tool_issues(self, profile: profiles.Profile) -> List[str]:
+        report = preflight.PreflightReport()
+        bpftrace = preflight.check_bpftrace(report, binary=self.options.bpftrace)
+        issues = [] if bpftrace.status == preflight.PASS else [bpftrace.message]
+        return issues + self._probe_program_issues(profile)
 
     # -- targets ----------------------------------------------------------
 
@@ -416,6 +431,13 @@ class Service:
                 f"(it costs {profile.expected_overhead})",
             )
 
+        issues = self.tool_issues(profile)
+        if issues:
+            raise Rejected(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                "missing collection tools: " + "; ".join(issues),
+            )
+
         with self._lock:
             if self._current is not None:
                 running = self._jobs[self._current]
@@ -519,6 +541,9 @@ class Service:
     def health(self) -> Dict[str, Any]:
         with self._lock:
             current = self._current
+        report = preflight.PreflightReport()
+        bpftrace = preflight.check_bpftrace(report, binary=self.options.bpftrace)
+        tool_issues = [] if bpftrace.status == preflight.PASS else [bpftrace.message]
         return {
             "performer": __version__,
             "schema_version": layout.SCHEMA_VERSION,
@@ -527,7 +552,8 @@ class Service:
             "profiles": self.allowed_profiles(),
             "busy": current is not None,
             "current_job": current,
-            "can_collect": os.geteuid() == 0,
+            "can_collect": os.geteuid() == 0 and not tool_issues,
+            "tool_issues": tool_issues,
             "viewer": layout.viewer_index() is not None,
         }
 

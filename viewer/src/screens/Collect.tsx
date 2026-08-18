@@ -161,9 +161,14 @@ export function Collect({
       {!status.can_collect && (
         <div className="rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
           <span className="mr-2 font-bold">!</span>
-          This daemon is not running as root, so attaching eBPF programs will
-          fail its preflight. Restart it with <code>sudo</code> — the failure
-          would otherwise come after the target has already been disturbed.
+          {status.tool_issues.length > 0
+            ? `Collection is unavailable: ${status.tool_issues.join("; ")}`
+            : <>This daemon is not running as root. Restart it with <code>sudo</code> to collect.</>}
+        </div>
+      )}
+      {profile && profile.tool_issues.length > 0 && (
+        <div className="rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+          This profile cannot run: {profile.tool_issues.join("; ")}
         </div>
       )}
       {error && (
@@ -320,7 +325,8 @@ export function Collect({
               type="button"
               onClick={() => void start()}
               disabled={
-                pid === null || !label || Boolean(labelProblem) || running
+                pid === null || !label || Boolean(labelProblem) || running ||
+                !status.can_collect || Boolean(profile?.tool_issues.length)
               }
               className="w-full rounded bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
             >

@@ -9,6 +9,17 @@ label=${PERFORMER_LABEL:-docker-demo}
 profile=${PERFORMER_PROFILE:-standard}
 performer=/opt/performer/collector/bin/performer
 
+missing_tools=
+for tool in mount grep sed find wc sleep bpftrace python3; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        missing_tools="$missing_tools $tool"
+    fi
+done
+if [ -n "$missing_tools" ]; then
+    echo "performer demo: missing required tools:$missing_tools" >&2
+    exit 1
+fi
+
 target_pid=
 
 cleanup() {
