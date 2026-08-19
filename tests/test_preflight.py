@@ -77,7 +77,10 @@ class IndividualCheckTests(unittest.TestCase):
         self.assertEqual(report.get("bpftrace").status, preflight.FAIL)
         self.assertEqual(report.get("probe_programs").status, preflight.FAIL)
         self.assertEqual(report.get("frame_pointers").status, preflight.SKIP)
-        self.assertIn("oncpu.bt", preflight.render(report))
+        rendered = preflight.render(report)
+        self.assertIn("oncpu.bt", rendered)
+        self.assertIn("probe trials", rendered)
+        self.assertNotIn("smoke:oncpu", rendered)
         target.assert_not_called()
         trial.assert_not_called()
 

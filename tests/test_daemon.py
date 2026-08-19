@@ -560,7 +560,8 @@ class CollectTests(DaemonTestCase):
         self.assertEqual(call["duration_s"], 5)
 
     def test_missing_tools_reject_before_a_job_is_created(self):
-        self.service.tool_issues = lambda _profile: ["bpftrace executable is missing"]
+        self.service.options.bpftrace = "/nonexistent/performer-bpftrace"
+        self.service.tool_issues = daemon.Service.tool_issues.__get__(self.service)
         status, body = self.start()
         self.assertEqual(status, 503)
         self.assertIn("bpftrace", body["error"])

@@ -198,8 +198,9 @@ def check_probe_programs(profile: Profile) -> Check:
     """Check every file before running any of the profile's programs."""
     directory = profiles.probes_dir()
     missing = []
-    for spec in profile.probes:
-        path = directory / spec.program
+    programs = {profiles.ONCPU.program, *(spec.program for spec in profile.probes)}
+    for program in sorted(programs):
+        path = directory / program
         try:
             readable = path.is_file() and bool(path.stat().st_mode & 0o444)
         except OSError:
@@ -214,7 +215,7 @@ def check_probe_programs(profile: Profile) -> Check:
             hint="Install the probes/ directory or fix PERFORMER_PROBES_DIR.",
             details={"missing": missing},
         )
-    return Check("probe_programs", PASS, f"all {len(profile.probes)} profile probe programs are available")
+    return Check("probe_programs", PASS, f"all {len(programs)} required probe programs are available")
 
 
 def check_target(report: PreflightReport, pid: int) -> Check:
@@ -599,7 +600,15 @@ def render(report: PreflightReport) -> str:
     mark = {PASS: "[ok]", WARN: "[!]", FAIL: "[X]", SKIP: "[-]"}
     lines = ["preflight"]
     shown_errors = set()
+    missing_tools = any(
+        check.status == FAIL and check.name in ("bpftrace", "probe_programs")
+        for check in report.checks
+    )
     for check in report.checks:
+        if missing_tools and check.status == SKIP and (
+            check.name == "frame_pointers" or check.name.startswith("smoke:")
+        ):
+            continue
         lines.append(f"  {mark[check.status]} {check.name:<22} {check.message}")
         if check.hint and check.status in (FAIL, WARN):
             lines.append(f"       -> {check.hint}")
@@ -611,6 +620,8 @@ def render(report: PreflightReport) -> str:
             if cause and cause not in shown_errors:
                 lines.append(f"       cause: {cause}")
                 shown_errors.add(cause)
+    if missing_tools:
+        lines.append("  [-] probe trials           not run: required tools are unavailable")
     return "\n".join(lines)
 
 
