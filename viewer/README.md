@@ -13,7 +13,8 @@ Then open `dist/index.html` by double clicking it. That is the whole
 deployment: the analysis machine needs a browser and nothing else.
 
 To run the same self-contained page in Docker instead, from the repository
-root run `make docker-viewer`. This builds `performer-viewer:local` from source
+root run `docker compose up -d --build` (or `make docker-viewer`). The root
+Compose file only serves the web viewer. It builds `performer-viewer:local` from source
 and serves it at `http://127.0.0.1:8080/` (override the host port with
 `PERFORMER_VIEWER_PORT`). `make docker-viewer-image` builds without starting a
 container; `make docker-viewer-down` stops it. The running image contains no

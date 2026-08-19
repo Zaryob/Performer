@@ -1,7 +1,9 @@
 # Docker Compose demo
 
 The demo runs a known, mutex-heavy C++ workload and attaches Performer from a
-second container. The resulting bundle is written to `runs/` on the host.
+second container. Its Compose file and Docker assets live under `tests/`; the
+root Compose file serves only the web viewer. The resulting bundle is written
+to `runs/` on the host.
 
 ## Run a real collection
 
@@ -39,8 +41,8 @@ The default command uses `--abort-on-container-exit` and returns the collector
 exit code. To inspect service logs or control the lifecycle manually:
 
 ```console
-$ docker compose up --build
-$ docker compose down
+$ docker compose -f tests/compose.yaml up --build
+$ docker compose -f tests/compose.yaml down
 ```
 
 ### Kernel requirements

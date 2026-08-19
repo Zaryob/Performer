@@ -181,7 +181,8 @@ schema: OK (11 file(s) validated against ./schema)
 ## Docker Compose demo
 
 To run Performer against the repository's mutex-contention sample in two
-containers and write a validated bundle to `runs/`:
+containers and write a validated bundle to `runs/`, use the test Compose file
+at `tests/compose.yaml`:
 
 ```console
 $ make docker-demo
@@ -237,7 +238,7 @@ Bundles are accepted as either a `.tgz` or an unpacked run directory.
 
 ```console
 $ open viewer/dist/index.html      # or just double click it
-$ make docker-viewer               # alternatively, build and serve the viewer locally
+$ docker compose up -d --build     # build and serve the viewer locally
 ```
 
 `dist/index.html` is one self-contained file — no server, no toolchain, no

@@ -19,7 +19,7 @@ help:
 	@echo "make docker-viewer-image  build the offline viewer image"
 	@echo "make docker-viewer  build and serve the viewer on localhost"
 	@echo "make docker-viewer-down  stop the local viewer"
-	@echo "make docker-down  remove stopped demo containers and network"
+	@echo "make docker-down  stop and remove the test containers and network"
 	@echo "make clean    remove $(RUNS) and __pycache__"
 
 test:
@@ -58,26 +58,26 @@ viewer:
 
 docker-demo:
 	mkdir -p $(RUNS)
-	PERFORMER_RUNS_DIR=$(abspath $(RUNS)) docker compose up --build --abort-on-container-exit --exit-code-from performer
+	PERFORMER_RUNS_DIR=$(abspath $(RUNS)) docker compose -f tests/compose.yaml up --build --abort-on-container-exit --exit-code-from performer
 
 docker-fake:
 	mkdir -p $(RUNS)
-	DOCKER_UID=$$(id -u) DOCKER_GID=$$(id -g) PERFORMER_RUNS_DIR=$(abspath $(RUNS)) docker compose run --build --rm --no-deps synthetic
+	DOCKER_UID=$$(id -u) DOCKER_GID=$$(id -g) PERFORMER_RUNS_DIR=$(abspath $(RUNS)) docker compose -f tests/compose.yaml run --build --rm --no-deps synthetic
 	@bundle=$$(ls -t $(RUNS)/performer-*-docker-synthetic.tgz | head -n 1); \
 		$(CLI) validate --verify-hashes "$$bundle"
 
 docker-viewer-image:
-	docker compose --profile viewer build viewer
+	docker compose build viewer
 
 docker-viewer: docker-viewer-image
-	docker compose --profile viewer up -d --no-build viewer
+	docker compose up -d --no-build viewer
 	@echo "Viewer: http://127.0.0.1:$${PERFORMER_VIEWER_PORT:-8080}/"
 
 docker-viewer-down:
-	docker compose --profile viewer stop viewer
+	docker compose stop viewer
 
 docker-down:
-	docker compose down --remove-orphans
+	docker compose -f tests/compose.yaml down --remove-orphans
 # Needs root to actually collect; without it the API answers can_collect:false
 # and the browser says so before anything is disturbed.
 serve:

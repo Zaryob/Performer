@@ -1,89 +1,13 @@
-name: performer-demo
+name: performer-viewer
 
 services:
-  target:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      target: demo-target
-    image: performer-demo-target:local
-    pid: host
-    command:
-      - --threads
-      - "${DEMO_THREADS:-16}"
-      - --contention
-      - "${DEMO_CONTENTION:-90}"
-      - --hold-us
-      - "${DEMO_HOLD_US:-50}"
-      - --sleep-us
-      - "${DEMO_SLEEP_US:-200}"
-      - --work
-      - "${DEMO_WORK:-200}"
-      - --churn-ms
-      - "${DEMO_CHURN_MS:-250}"
-      - --seconds
-      - "0"
-    volumes:
-      - coordination:/coord
-    stop_grace_period: 10s
-
-  performer:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      target: performer-collector
-    image: performer-collector:local
-    pid: host
-    privileged: true
-    depends_on:
-      target:
-        condition: service_started
-    environment:
-      COLLECT_DURATION: "${COLLECT_DURATION:-10}"
-      EXPECTED_WORKERS: "${DEMO_THREADS:-16}"
-      PERFORMER_LABEL: "${PERFORMER_LABEL:-docker-demo}"
-      PERFORMER_PROFILE: "${PERFORMER_PROFILE:-standard}"
-      TARGET_PID_FILE: /coord/target.pid
-    ulimits:
-      nofile:
-        soft: 1048576
-        hard: 1048576
-    volumes:
-      - coordination:/coord:ro
-      - "${PERFORMER_RUNS_DIR:-./runs}:/runs"
-    stop_grace_period: 45s
-
-  synthetic:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      target: performer-collector
-    image: performer-collector:local
-    user: "${DOCKER_UID:-0}:${DOCKER_GID:-0}"
-    entrypoint: ["/opt/performer/collector/bin/performer"]
-    command:
-      - fake-run
-      - --out
-      - /runs
-      - --label
-      - docker-synthetic
-      - --tag
-      - docker
-    profiles: ["synthetic"]
-    volumes:
-      - "${PERFORMER_RUNS_DIR:-./runs}:/runs"
-
   viewer:
     build:
       context: .
-      dockerfile: docker/Dockerfile.viewer
+      dockerfile: docker/Dockerfile
     image: performer-viewer:local
-    profiles: ["viewer"]
     ports:
       - "127.0.0.1:${PERFORMER_VIEWER_PORT:-8080}:8080"
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-
-volumes:
-  coordination:
