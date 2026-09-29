@@ -71,6 +71,7 @@ export interface JobInfo {
   profile: string;
   label: string;
   duration_s: number;
+  pmu: "off" | "basic";
   state: JobState;
   started_at: number | null;
   ended_at: number | null;
@@ -87,6 +88,7 @@ export interface CollectRequest {
   profile: string;
   label: string;
   duration_s: number;
+  pmu?: "off" | "basic";
   tags?: string[];
   notes?: string;
 }

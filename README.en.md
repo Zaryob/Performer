@@ -24,6 +24,9 @@ The Linux target needs Python 3.8+, `bpftrace`, and eBPF privileges:
 sudo ./collector/bin/performer collect --pid PID --duration 30 --profile standard --label baseline --out runs
 ```
 
+Add `--pmu basic` for hardware counters. The viewer shows them in Overview,
+Threads, and Diff; see [scope and quality notes](docs/pmu.md).
+
 Preflight stops before collection when a required tool or probe file is missing.
 If some probes work, failures in the others are recorded as warnings.
 GitHub and GitLab CI produce `performer-collector` `.deb` files for Ubuntu

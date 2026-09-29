@@ -24,6 +24,9 @@ Linux makinede Python 3.8+, `bpftrace` ve eBPF yetkileri gerekir:
 sudo ./collector/bin/performer collect --pid PID --duration 30 --profile standard --label baseline --out runs
 ```
 
+Donanım sayaçlarını da toplamak için `--pmu basic` ekleyin. Sonuçlar görüntüleyicide
+Overview, Threads ve Diff ekranlarında görünür; [sınırlar ve kalite bilgisi](docs/pmu.md).
+
 Başlangıç kontrolü eksik araç veya prob dosyası bulursa ölçüm başlamaz.
 Çalışabilen problar varsa diğerlerinin hatası uyarı olarak kaydedilir.
 Ubuntu 22.04/24.04 için `performer-collector` `.deb` dosyaları GitHub ve GitLab

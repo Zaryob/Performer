@@ -37,6 +37,8 @@ import { STACK_KINDS, type StackKindId } from "../bundle/types";
 import { stacksAreTrustworthy } from "../quality";
 import { FlameGraph } from "../components/FlameGraph";
 import { Empty, Panel, formatDuration } from "../components/ui";
+import { ratio as pmuRatio, readPmu, runningShare, value as pmuValue } from "../pmu";
+import type { PmuEvent } from "../bundle/types";
 
 const MIN_SHARE_CHOICES = [
   { label: "every path", share: 0 },
@@ -101,7 +103,10 @@ export function Diff({ bundles, aKey, bKey, onPick, onSwap }: DiffProps) {
       </Panel>
 
       {a && b && a.key !== b.key ? (
-        <Comparison a={a} b={b} />
+        <>
+          <PmuComparison a={a} b={b} />
+          <Comparison a={a} b={b} />
+        </>
       ) : (
         <Empty>
           {bundles.length < 2
@@ -110,6 +115,59 @@ export function Diff({ bundles, aKey, bKey, onPick, onSwap }: DiffProps) {
         </Empty>
       )}
     </div>
+  );
+}
+
+function PmuComparison({ a, b }: { a: Bundle; b: Bundle }) {
+  const before = readPmu(a);
+  const after = readPmu(b);
+  if (!before && !after) return null;
+  if (!before || !after) {
+    return <Panel title="Hardware counters">PMU data is present in only one run; there is no PMU comparison.</Panel>;
+  }
+  if (!before.cpu_model || !after.cpu_model || before.cpu_model !== after.cpu_model || before.arch !== after.arch) {
+    return <Panel title="Hardware counters">Different CPU models or architectures; PMU counters are not compared.</Panel>;
+  }
+  const perSecond = (event: PmuEvent | undefined, seconds: number) => {
+    const count = pmuValue(event);
+    return count === null || seconds <= 0 || (runningShare(event) ?? 0) < 0.9
+      ? null : count / seconds;
+  };
+  const metrics = [
+    {
+      name: "cycles/s", a: perSecond(before.totals.cycles, before.window_s),
+      b: perSecond(after.totals.cycles, after.window_s),
+      digits: 0,
+    },
+    {
+      name: "instructions/s", a: perSecond(before.totals.instructions, before.window_s),
+      b: perSecond(after.totals.instructions, after.window_s),
+      digits: 0,
+    },
+    { name: "IPC", a: pmuRatio(before.totals.instructions, before.totals.cycles), b: pmuRatio(after.totals.instructions, after.totals.cycles), digits: 2 },
+    { name: "branch miss rate", a: pmuRatio(before.totals.branch_misses, before.totals.branches), b: pmuRatio(after.totals.branch_misses, after.totals.branches), digits: 3 },
+    { name: "cache miss rate", a: pmuRatio(before.totals.cache_misses, before.totals.cache_references), b: pmuRatio(after.totals.cache_misses, after.totals.cache_references), digits: 3 },
+  ];
+  return (
+    <Panel title="Hardware counters · A → B">
+      <p className="mb-2 text-xs text-slate-400">User-space process totals; count rates account for different run lengths. Counters are not assigned to functions.</p>
+      {(before.status !== "ok" || after.status !== "ok") &&
+        <p className="mb-2 text-sm text-amber-200">At least one PMU result is partial. Check each run's Overview before interpreting the change.</p>}
+      <table className="w-full text-sm">
+        <thead><tr className="text-left text-xs uppercase text-slate-400"><th>Metric</th><th className="text-right">A</th><th className="text-right">B</th><th className="text-right">Change</th></tr></thead>
+        <tbody>{metrics.map((metric) => {
+          const valid = metric.a !== null && metric.b !== null;
+          const delta = valid ? metric.b! - metric.a! : null;
+          return <tr key={metric.name} className="border-t border-slate-800">
+            <td className="py-1.5">{metric.name}</td>
+            <td className="text-right tabular-nums">{metric.a?.toLocaleString(undefined, { maximumFractionDigits: metric.digits }) ?? "—"}</td>
+            <td className="text-right tabular-nums">{metric.b?.toLocaleString(undefined, { maximumFractionDigits: metric.digits }) ?? "—"}</td>
+            <td className="text-right tabular-nums">{delta === null ? "—" : `${delta >= 0 ? "+" : ""}${delta.toLocaleString(undefined, { maximumFractionDigits: metric.digits })}`}</td>
+          </tr>;
+        })}</tbody>
+      </table>
+      <p className="mt-2 text-xs text-slate-500">Threads measured: {before.threads_measured} → {after.threads_measured}. Different thread counts also affect total rates.</p>
+    </Panel>
   );
 }
 

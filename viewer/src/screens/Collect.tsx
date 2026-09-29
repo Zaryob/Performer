@@ -41,6 +41,7 @@ export function Collect({
   const [pid, setPid] = useState<number | null>(null);
   const [profileName, setProfileName] = useState<string>("");
   const [duration, setDuration] = useState(60);
+  const [pmu, setPmu] = useState<"off" | "basic">("off");
   const [label, setLabel] = useState("");
   const [notes, setNotes] = useState("");
   const [job, setJob] = useState<JobInfo | null>(null);
@@ -138,6 +139,7 @@ export function Collect({
         profile: profile.name,
         label: label.trim(),
         duration_s: duration,
+        pmu,
         notes: notes.trim() || undefined,
       }));
       setOpened(null);
@@ -279,6 +281,19 @@ export function Collect({
                 most {formatDuration(profile.max_duration_s)}
               </p>
             )}
+
+            <label className="flex flex-col gap-1 text-xs text-slate-400">
+              hardware counters
+              <select
+                aria-label="hardware counters"
+                value={pmu}
+                onChange={(event) => setPmu(event.target.value as "off" | "basic")}
+                className="rounded border border-slate-600 bg-slate-950 px-2 py-1.5 text-sm text-slate-100"
+              >
+                <option value="off">off</option>
+                <option value="basic">basic · cycles, instructions, branches, cache</option>
+              </select>
+            </label>
 
             <label className="flex flex-col gap-1 text-xs text-slate-400">
               duration — {formatDuration(duration)}

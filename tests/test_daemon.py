@@ -559,6 +559,19 @@ class CollectTests(DaemonTestCase):
         self.assertEqual(call["label"], "ok")
         self.assertEqual(call["duration_s"], 5)
 
+    def test_pmu_mode_reaches_the_collector(self):
+        status, job = self.start(pmu="basic")
+        self.assertEqual(status, 202)
+        self.assertEqual(job["pmu"], "basic")
+        self.assertTrue(wait_until(lambda: self.collect_calls, timeout=5))
+        self.assertEqual(self.collect_calls[0]["pmu"], "basic")
+
+    def test_unknown_pmu_mode_is_rejected_before_collection(self):
+        status, body = self.start(pmu="../../bad")
+        self.assertEqual(status, 400)
+        self.assertIn("pmu must", body["error"])
+        self.assertEqual(self.collect_calls, [])
+
     def test_missing_tools_reject_before_a_job_is_created(self):
         self.service.options.bpftrace = "/nonexistent/performer-bpftrace"
         self.service.tool_issues = daemon.Service.tool_issues.__get__(self.service)

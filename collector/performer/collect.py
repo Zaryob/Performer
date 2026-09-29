@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from . import emit, layout, manifest as manifest_mod, preflight as preflight_mod
-from . import proc, profiles
+from . import pmu as pmu_mod, proc, profiles
 from . import __version__
 from .bundle import BundleBuilder
 from .errors import PerformerError, PreflightError
@@ -58,6 +58,7 @@ class CollectOptions:
     pack: bool = True
     annotate_kernel: bool = False
     bpftrace: Optional[str] = None
+    pmu: str = "off"
     #: Trial durations used by preflight. Shortened by the test suite; there
     #: is no CLI flag because a shorter trial measures stack quality worse.
     preflight_trial_s: float = preflight_mod.TRIAL_S
@@ -81,6 +82,23 @@ def collect(
     *,
     printer: Printer = print,
     cancel: Optional[threading.Event] = None,
+) -> CollectResult:
+    if options.pmu not in ("off", "basic"):
+        raise PerformerError(f"unknown PMU mode {options.pmu!r}")
+    pmu_session = pmu_mod.Session(options.pid) if options.pmu == "basic" else None
+    try:
+        return _collect(options, printer=printer, cancel=cancel, pmu_session=pmu_session)
+    finally:
+        if pmu_session is not None:
+            pmu_session.close()
+
+
+def _collect(
+    options: CollectOptions,
+    *,
+    printer: Printer,
+    cancel: Optional[threading.Event],
+    pmu_session: Optional[pmu_mod.Session],
 ) -> CollectResult:
     """Measure a process and write a run bundle.
 
@@ -130,6 +148,16 @@ def collect(
             + detail
         )
 
+    if pmu_session is not None:
+        pmu_session.prepare()
+        printer(
+            "preflight: PMU basic ready for "
+            f"{len(pmu_session.threads)} threads; "
+            f"events: {', '.join(name for group in pmu_session.groups for name in group)}"
+        )
+        for warning in pmu_session.warnings:
+            printer(f"  [!] {warning}")
+
     # ---- set up the bundle ------------------------------------------
     started_at = manifest_mod.utc_now()
     builder = BundleBuilder(options.out_dir, label=options.label, started_at=started_at)
@@ -156,6 +184,12 @@ def collect(
     # was being measured.
     ticks_start = proc.cpu_ticks(options.pid)
     run_started = time.monotonic()
+    if pmu_session is not None:
+        try:
+            pmu_session.start()
+        except OSError:
+            stop_all([probe for _spec, probe in launched])
+            raise
     watcher.start()
     sampler.start()
 
@@ -169,6 +203,8 @@ def collect(
         )
     # Closed together, for the same reason they were opened together.
     elapsed = time.monotonic() - run_started
+    if pmu_session is not None:
+        pmu_session.stop()
     ticks_end = proc.cpu_ticks(options.pid)
 
     # ---- stop everything --------------------------------------------
@@ -190,6 +226,18 @@ def collect(
     probe_results = _finish_probes(
         builder, launched, report, profile, options, printer, elapsed
     )
+    if pmu_session is not None:
+        pmu_doc = pmu_session.document()
+        builder.add_json(layout.PMU_COUNTERS, pmu_doc)
+        probe_results.append(
+            manifest_mod.ProbeResult(
+                name="pmu_basic",
+                status=pmu_doc["status"],
+                duration_s=pmu_doc["window_s"],
+                outputs=[layout.PMU_COUNTERS],
+                warnings=pmu_doc["warnings"],
+            )
+        )
 
     thread_count_start = len(threads_start)
     thread_count_end = len(threads_end)
