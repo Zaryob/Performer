@@ -6,6 +6,7 @@ __pycache__/
 
 # Collected and synthetic run bundles are outputs, never sources.
 /runs/
+/dist/
 *.tgz
 
 # Viewer: dist/ IS committed on purpose -- the analysis machine has no

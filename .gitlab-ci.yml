@@ -1,0 +1,28 @@
+stages:
+  - package
+
+.collector-deb:
+  stage: package
+  script:
+    - apt-get update
+    - apt-get install -y bpftrace g++ make python3
+    - make check
+    - bash packaging/build-deb.sh "$UBUNTU_VERSION"
+    - bash packaging/smoke-deb.sh dist/*.deb
+  artifacts:
+    name: "performer-collector-ubuntu-$UBUNTU_VERSION"
+    paths:
+      - dist/*.deb
+    expire_in: 14 days
+
+ubuntu-22.04:
+  extends: .collector-deb
+  image: ubuntu:22.04
+  variables:
+    UBUNTU_VERSION: '22.04'
+
+ubuntu-24.04:
+  extends: .collector-deb
+  image: ubuntu:24.04
+  variables:
+    UBUNTU_VERSION: '24.04'

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import unittest
 
 from performer.parse import hist, syscalls
@@ -156,17 +157,34 @@ class SyscallTableTests(unittest.TestCase):
 
     def test_names_resolve(self):
         table = syscalls.load()
-        self.assertEqual(table.name(0), "read")
-        self.assertEqual(table.name(202), "futex")
-        self.assertEqual(table.name(230), "clock_nanosleep")
+        machine = os.uname().machine
+        if machine == "x86_64":
+            self.assertEqual(table.name(0), "read")
+            self.assertEqual(table.name(202), "futex")
+            self.assertEqual(table.name(230), "clock_nanosleep")
+        elif machine == "aarch64" and "no built-in" not in table.source:
+            self.assertEqual(table.name(63), "read")
+            self.assertEqual(table.name(98), "futex")
+            self.assertEqual(table.name(115), "clock_nanosleep")
+        else:
+            self.skipTest(f"no known syscall table for {machine}")
 
     def test_unknown_numbers_are_named_honestly(self):
         table = syscalls.load()
         self.assertFalse(table.known(999_999))
         self.assertEqual(table.name(999_999), "syscall_999999")
 
+    def test_non_x86_fallback_does_not_guess_names(self):
+        if os.uname().machine == "x86_64":
+            self.skipTest("x86_64 has a built-in table")
+        table = syscalls.load(prefer_headers=False)
+        self.assertFalse(table.known(202))
+        self.assertEqual(table.name(202), "syscall_202")
+
     def test_builtin_fallback_agrees_with_the_system_headers(self):
         """A wrong table would silently mislabel every row."""
+        if os.uname().machine != "x86_64":
+            self.skipTest("the built-in table is for x86_64")
         from_headers = syscalls.load()
         if "built-in" in from_headers.source:
             self.skipTest("no system syscall headers on this host to compare against")

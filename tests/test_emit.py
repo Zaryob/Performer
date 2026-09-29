@@ -11,10 +11,12 @@ import datetime as _dt
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from performer import emit, layout
 from performer.bundle import BundleBuilder
 from performer.jsonschema import load_schema
+from performer.parse import syscalls
 
 from .fake_bpftrace import OUTPUT_BY_PROBE
 
@@ -234,6 +236,14 @@ class WakeupTests(EmitterTestCase):
 
 
 class SyscallLatTests(EmitterTestCase):
+    def setUp(self):
+        super().setUp()
+        # The captured bpftrace fixture uses x86_64 syscall numbers.
+        mapping = syscalls.SyscallTable(dict(syscalls._X86_64), "fixture x86_64 table")
+        mock = patch.object(emit.syscall_parse, "load", return_value=mapping)
+        mock.start()
+        self.addCleanup(mock.stop)
+
     def test_numbers_become_names(self):
         result = self.run_emitter("syscall_lat")
         self.assertEqual(result.outputs, [layout.HIST_SYSCALL_LATENCY])

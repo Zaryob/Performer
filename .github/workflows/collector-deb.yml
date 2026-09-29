@@ -1,0 +1,33 @@
+name: Collector Debian packages
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  package:
+    name: Ubuntu ${{ matrix.ubuntu }}
+    runs-on: ubuntu-${{ matrix.ubuntu }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ['22.04', '24.04']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test and package dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bpftrace g++ make python3
+      - name: Test collector
+        run: sudo make check
+      - name: Build Debian package
+        run: bash packaging/build-deb.sh '${{ matrix.ubuntu }}'
+      - name: Install and smoke test package
+        run: sudo bash packaging/smoke-deb.sh dist/*.deb
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: performer-collector-ubuntu-${{ matrix.ubuntu }}
+          path: dist/*.deb
+          if-no-files-found: error

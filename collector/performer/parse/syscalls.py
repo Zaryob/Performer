@@ -117,9 +117,15 @@ def load(*, prefer_headers: bool = True) -> SyscallTable:
             _cached = SyscallTable(table, source or "system headers")
             return _cached
     machine = os.uname().machine
-    _cached = SyscallTable(
-        dict(_X86_64), f"built-in x86_64 table (host is {machine})"
+    # Never apply x86 syscall numbers to another architecture. An unknown
+    # number is safer than silently labelling an unrelated syscall as futex.
+    fallback = dict(_X86_64) if machine in ("x86_64", "amd64") else {}
+    source = (
+        "built-in x86_64 table"
+        if fallback
+        else f"no built-in syscall table for {machine}"
     )
+    _cached = SyscallTable(fallback, source)
     return _cached
 
 
