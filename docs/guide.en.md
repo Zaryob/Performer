@@ -115,9 +115,13 @@ missed.
 
 Preflight reports probe startup failures as warnings and collects with the
 probes that passed. The bundle is marked partial and records failed probes.
-If every probe fails, collection stops and prints the first probe error;
-there is no measurement to save. Trial errors appear directly in the preflight
-output because its temporary stderr files are removed afterward.
+If no probe produces data and PMU is off, collection stops and prints the
+first probe error; there is no measurement to save. A `threadlife` probe that
+attaches cleanly but sees no thread creation or exit is still usable: its
+bundle contains an empty threadlife table and a note explaining the absence
+of events. That empty trial alone does not justify starting a run. Trial
+errors appear directly in the preflight output because its temporary stderr
+files are removed afterward.
 
 Preflight refuses to start a measurement with known unusable stacks.
 Above 30% unresolved frames it stops and tells you to rebuild with

@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from performer import layout
+from performer import layout, profiles
 from performer.bundle import Bundle
 from performer.collect import CollectOptions, collect
 from performer.errors import PerformerError, PreflightError
@@ -380,6 +380,34 @@ class StandardProfileTests(unittest.TestCase):
             },
         )
         self.assertEqual(result.manifest["status"], "ok")
+
+    def test_stable_thread_pool_keeps_threadlife_and_run_ok(self):
+        with spawn_target(threads=8, seconds=90) as target, fake_bpftrace("threadlife_silent"):
+            result = collect(self._options(target.pid), printer=quiet)
+
+        self.assertEqual(result.preflight.get("smoke:threadlife").status, "pass")
+        probe = next(p for p in result.manifest["probes"] if p["name"] == "threadlife")
+        self.assertEqual(probe["status"], "ok")
+        self.assertEqual(result.manifest["status"], "ok")
+        with Bundle.open(result.archive) as bundle:
+            self.assertTrue(bundle.validate().ok)
+            self.assertEqual(bundle.read_json(layout.HIST_THREADLIFE)["rows"], [])
+
+    def test_threadlife_with_events_can_be_the_only_probe(self):
+        profile = profiles.Profile(
+            name="threadlife-only", description="event-driven probe",
+            probes=(profiles.ProbeSpec("threadlife", "threadlife.bt"),),
+            max_duration_s=60, expected_overhead="low",
+        )
+        with spawn_target(threads=8, seconds=90) as target, fake_bpftrace("normal"), \
+             patch("performer.collect.profiles.load", return_value=profile):
+            result = collect(self._options(target.pid), printer=quiet)
+
+        self.assertEqual(result.preflight.data_probes, ["threadlife"])
+        self.assertEqual(result.manifest["status"], "ok")
+        with Bundle.open(result.archive) as bundle:
+            self.assertTrue(bundle.validate().ok)
+            self.assertTrue(bundle.read_json(layout.HIST_THREADLIFE)["rows"])
 
     def test_the_bundle_holds_every_expected_artifact(self):
         with spawn_target(threads=32, seconds=90) as target, fake_bpftrace("normal"):

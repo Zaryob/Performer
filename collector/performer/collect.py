@@ -125,7 +125,7 @@ def _collect(
     printer(preflight_mod.render(report))
 
     blocking = _blocking_failures(report, options)
-    if pmu_session is not None and not report.usable_probes:
+    if pmu_session is not None and not report.data_probes:
         # Frame pointers only judge eBPF user stacks. They do not determine
         # whether a hardware-counter-only run is useful.
         blocking = [check for check in blocking if check.name != "frame_pointers"]
@@ -135,7 +135,7 @@ def _collect(
             + "\n".join(f"  - {c.name}: {c.message}" for c in blocking)
             + _override_hint(blocking)
         )
-    if not report.usable_probes and pmu_session is None:
+    if not report.data_probes and pmu_session is None:
         causes = []
         for check in report.checks:
             if not check.name.startswith("smoke:"):
@@ -149,7 +149,7 @@ def _collect(
             first = next((c for c in report.checks if c.name.startswith("smoke:")), None)
             detail = f" {first.name}: {first.message}" if first else ""
         raise PreflightError(
-            "no probe survived its smoke test; there is nothing to collect."
+            "no probe survived its smoke test with data; there is nothing to collect."
             + detail
         )
 

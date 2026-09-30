@@ -146,7 +146,7 @@ viewer is entitled to trust this field.
 
 | value | meaning |
 |---|---|
-| `ok` | ran and produced output |
+| `ok` | ran and produced output; `threadlife` may write an empty table when no thread events occurred |
 | `partial` | ran, but lost events or was killed before a clean dump |
 | `failed` | smoke test or startup failed; produced nothing |
 | `skipped` | not requested by the profile, or disabled by preflight |

@@ -277,6 +277,72 @@ class SmokeReuseTests(unittest.TestCase):
         self.assertEqual([c.status for c in checks], [preflight.WARN])
 
 
+class SilentThreadlifeTests(unittest.TestCase):
+    def setUp(self):
+        self.profile = profiles.Profile(
+            name="threadlife-only",
+            description="event-driven smoke test",
+            probes=(profiles.ProbeSpec("threadlife", "threadlife.bt"),),
+            max_duration_s=60,
+            expected_overhead="low",
+        )
+
+    def check(self, trial):
+        report = preflight.PreflightReport()
+        with mock.patch.object(preflight, "run_trial", return_value=trial):
+            check, = preflight.check_smoke(report, self.profile, 1)
+        report.add(check)
+        return report, check
+
+    def test_clean_empty_trial_is_a_valid_no_churn_observation(self):
+        for reason, code in (("sigint", 0), ("exited", 0)):
+            with self.subTest(reason=reason):
+                report, check = self.check(preflight.TrialResult(
+                    ran=True, stdout="Attaching 3 probes...\n", stderr="",
+                    exit_reason=reason, exit_code=code,
+                ))
+                self.assertTrue(report.smoke["threadlife"])
+                self.assertEqual(report.usable_probes, ["threadlife"])
+                self.assertEqual(report.data_probes, [])
+                self.assertFalse(report.ok)
+                self.assertEqual(check.status, preflight.PASS)
+                self.assertIn("no thread creation or exit", check.message)
+
+    def test_threadlife_with_events_is_enough_for_a_run(self):
+        report, check = self.check(preflight.TrialResult(
+            ran=True, stdout="@fork_cnt[worker]: 1\n", stderr="",
+            exit_reason="sigint", exit_code=0, map_entries=1,
+        ))
+        self.assertEqual(check.status, preflight.PASS)
+        self.assertEqual(report.data_probes, ["threadlife"])
+        self.assertTrue(report.ok)
+
+    def test_empty_trial_with_attach_or_stop_error_still_fails(self):
+        cases = (
+            (False, "startup_error", 1, "stdin:1: ERROR: invalid provider"),
+            (True, "sigkill", -9, ""),
+            (True, "sigterm", -15, ""),
+            (True, "exited", 1, ""),
+            (True, "sigint", 0, "stdin:1: ERROR: invalid provider"),
+            (True, "sigint", 0, "Lost 3 events"),
+        )
+        for ran, reason, code, stderr in cases:
+            with self.subTest(reason=reason, stderr=stderr):
+                report, check = self.check(preflight.TrialResult(
+                    ran=ran, stdout="Attaching 3 probes...\n", stderr=stderr,
+                    exit_reason=reason, exit_code=code,
+                ))
+                self.assertFalse(report.smoke["threadlife"])
+                self.assertEqual(check.status, preflight.WARN)
+
+    def test_silence_without_an_attach_banner_is_not_accepted(self):
+        report, check = self.check(preflight.TrialResult(
+            ran=True, stdout="", stderr="", exit_reason="sigint", exit_code=0,
+        ))
+        self.assertFalse(report.smoke["threadlife"])
+        self.assertEqual(check.status, preflight.WARN)
+
+
 class BpftraceEnvTests(unittest.TestCase):
     def test_map_limits_are_raised_under_both_spellings(self):
         env = preflight.bpftrace_env()

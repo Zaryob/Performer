@@ -5,9 +5,10 @@ a later milestone means adding a ``.bt`` file, a profile entry and an emitter
 here; nothing else has to change.
 
 Every emitter is total about failure: it returns the paths it actually wrote
-and the warnings it wants recorded, and it never raises for missing data.  A
-probe that produced nothing must leave no file behind, because in this bundle
-format an existing file means real data.
+and the warnings it wants recorded, and it never raises for missing data. Most
+probes leave no file when they produce nothing. Threadlife is different: a
+successful run with no fork/exit events writes an empty table to distinguish
+"no churn" from a missing measurement.
 """
 
 from __future__ import annotations
@@ -520,6 +521,8 @@ def emit_syscall_lat(context: EmitContext, text: str) -> EmitResult:
 
 def emit_threadlife(context: EmitContext, text: str) -> EmitResult:
     result = EmitResult()
+    if not text.strip():
+        return result
     dump = hist_parse.parse_maps(text)
     result.warnings.extend(dump.warnings)
 
@@ -527,7 +530,6 @@ def emit_threadlife(context: EmitContext, text: str) -> EmitResult:
     exits = dict(dump.values.get("exit_cnt", []))
     if not forks and not exits:
         result.warnings.append("no threads were created or destroyed during the run")
-        return result
 
     names = sorted({key for key, _ in forks} | set(exits))
     fork_by_name = dict(forks)

@@ -288,8 +288,11 @@ class ThreadlifeTests(EmitterTestCase):
 
     def test_no_churn_is_reported_as_such(self):
         result = self.run_emitter("threadlife", "Attaching 2 probes...\n\n")
-        self.assertEqual(result.outputs, [])
+        self.assertEqual(result.outputs, [layout.HIST_THREADLIFE])
         self.assertTrue(any("no threads were created" in w for w in result.warnings))
+        self.assert_matches_schema(layout.HIST_THREADLIFE, "table.schema.json")
+        self.assertEqual(self.read(layout.HIST_THREADLIFE)["rows"], [])
+        self.assertEqual(self.read(layout.HIST_THREADLIFE)["total_rows"], 0)
 
 
 class TimersTests(EmitterTestCase):

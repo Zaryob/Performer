@@ -14,7 +14,8 @@ Checks, in order (spec section 6.1):
   4. RLIMIT_NOFILE >= threads x cpus x 2, raised in place when possible
   5. kernel.perf_event_paranoid
   6. frame pointer trial: a 2 second oncpu sample, measuring [unknown] frames
-  7. per probe smoke test: anything that produces nothing is disabled, loudly
+  7. per probe smoke test: empty output disables a probe, except a clean
+     threadlife trial (a stable thread pool has no fork/exit events)
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from . import proc, profiles
 from . import parse
 from .parse import stacks
 from .profiles import Profile, ProbeSpec
-from .runner import ATTACH_GRACE_S, ProbeProcess
+from .runner import ATTACH_GRACE_S, ProbeProcess, scan_stderr
 
 PASS = "pass"
 WARN = "warn"
@@ -50,6 +51,7 @@ UNKNOWN_FRAME_WARN = 0.10
 TRIAL_S = 2.0
 
 _VERSION_RE = re.compile(r"v?(\d+)\.(\d+)(?:\.(\d+))?")
+_ATTACH_BANNER_RE = re.compile(r"^Attaching \d+ probes?\.\.\.$", re.M)
 
 
 @dataclass
@@ -89,8 +91,11 @@ class PreflightReport:
     unknown_frame_ratio: float = 0.0
     unknown_frame_samples: int = 0
     total_frame_samples: int = 0
-    #: probe name -> whether its smoke test produced output
+    #: probe name -> whether its smoke test found a usable probe
     smoke: Dict[str, bool] = field(default_factory=dict)
+    #: probe name -> whether the trial actually produced map data. A clean,
+    #: empty threadlife trial is usable but cannot justify a run by itself.
+    smoke_data: Dict[str, bool] = field(default_factory=dict)
     smoke_warnings: Dict[str, List[str]] = field(default_factory=dict)
     cpu_before: Optional[Dict[str, object]] = None
 
@@ -113,11 +118,15 @@ class PreflightReport:
         if self.failures:
             return False
         attempted = [c for c in self.checks if c.name.startswith("smoke:") and c.status != SKIP]
-        return not attempted or bool(self.usable_probes)
+        return not attempted or bool(self.data_probes)
 
     @property
     def usable_probes(self) -> List[str]:
         return [name for name, good in self.smoke.items() if good]
+
+    @property
+    def data_probes(self) -> List[str]:
+        return [name for name in self.usable_probes if self.smoke_data.get(name, False)]
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -128,6 +137,7 @@ class PreflightReport:
             "frame_pointers_ok": self.frame_pointers_ok,
             "unknown_frame_ratio": self.unknown_frame_ratio,
             "smoke": dict(self.smoke),
+            "smoke_data": dict(self.smoke_data),
         }
 
 
@@ -369,6 +379,7 @@ class TrialResult:
     stdout: str
     stderr: str
     exit_reason: str
+    exit_code: Optional[int] = None
     folded: List[Tuple[str, int]] = field(default_factory=list)
     stats: stacks.FoldStats = field(default_factory=stacks.FoldStats)
     warnings: List[str] = field(default_factory=list)
@@ -413,11 +424,13 @@ def run_trial(
     grace = attach_grace_s if attach_grace_s is not None else ATTACH_GRACE_S
     probe.start()
     if not probe.started or not probe.wait_for_attach(grace, sleep=sleep):
+        info = probe.exit_info
         result = TrialResult(
             ran=False,
             stdout=probe.read_stdout(),
             stderr=probe.read_stderr(),
-            exit_reason=probe.exit_info.reason,
+            exit_reason=info.reason,
+            exit_code=info.exit_code,
             warnings=list(probe.warnings),
         )
         _cleanup(directory, temporary)
@@ -433,6 +446,7 @@ def run_trial(
         stdout=stdout,
         stderr=probe.read_stderr(),
         exit_reason=info.reason,
+        exit_code=info.exit_code,
         folded=folded,
         stats=stats,
         warnings=warnings + list(probe.warnings),
@@ -525,7 +539,7 @@ def check_smoke(
     reuse: Optional[Dict[str, TrialResult]] = None,
     **kwargs,
 ) -> List[Check]:
-    """Run every probe briefly; anything silent is disabled, never skipped quietly.
+    """Run every probe briefly; accept silence only for a healthy threadlife probe.
 
     ``reuse`` maps a probe name to a trial that already ran it: the frame
     pointer trial is an oncpu run, and on a mostly idle target a second two
@@ -539,15 +553,36 @@ def check_smoke(
             trial = run_trial(
                 spec, pid, bpftrace=report.bpftrace_path or "bpftrace", **kwargs
             )
-        produced = trial.produced_data
+        stderr_summary = scan_stderr(trial.stderr) if spec.name == "threadlife" else None
+        clean_threadlife = (
+            spec.name == "threadlife"
+            and trial.ran
+            and trial.map_entries == 0
+            and bool(_ATTACH_BANNER_RE.search(trial.stdout))
+            and (
+                trial.exit_reason == "sigint"
+                or (trial.exit_reason == "exited" and trial.exit_code == 0)
+            )
+            and not trial.warnings
+            and stderr_summary is not None
+            and not stderr_summary.has_errors
+            and not stderr_summary.events_lost
+        )
+        produced = trial.produced_data or clean_threadlife
         report.smoke[spec.name] = produced
+        report.smoke_data[spec.name] = trial.produced_data
         report.smoke_warnings[spec.name] = trial.warnings
         if produced:
+            message = (
+                "probe 'threadlife' attached; no thread creation or exit during trial"
+                if clean_threadlife
+                else f"probe '{spec.name}' attached and produced output"
+            )
             checks.append(
                 Check(
                     f"smoke:{spec.name}",
                     PASS,
-                    f"probe '{spec.name}' attached and produced output",
+                    message,
                 )
             )
             continue
@@ -635,6 +670,7 @@ def run_preflight(
         report.add(Check("frame_pointers", SKIP, f"not run: {reason}"))
         for spec in profile.probes:
             report.smoke[spec.name] = False
+            report.smoke_data[spec.name] = False
             report.add(Check(f"smoke:{spec.name}", SKIP, f"not run: {reason}"))
         return report
 
@@ -656,6 +692,7 @@ def run_preflight(
         report.add(Check("frame_pointers", SKIP, f"stack quality not measured: {reason}"))
         for spec in profile.probes:
             report.smoke[spec.name] = False
+            report.smoke_data[spec.name] = False
             report.add(Check(f"smoke:{spec.name}", SKIP, f"not run: {reason}"))
     else:
         trial_kwargs = {
