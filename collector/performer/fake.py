@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from . import layout
+from . import layout, pmu as pmu_mod
 from .bundle import BundleBuilder
 from .errors import PerformerError
 from .manifest import (
@@ -385,6 +385,7 @@ def generate(
     tags: Sequence[str] = ("synthetic",),
     notes: str = "",
     pack: bool = True,
+    pmu: str = "off",
     started_at: Optional[_dt.datetime] = None,
 ) -> Tuple[Path, Path]:
     """Write a synthetic bundle.
@@ -799,6 +800,57 @@ def generate(
         ),
     ]
 
+    if pmu == "basic":
+        event_names = [name for group in pmu_mod.EVENT_GROUPS for name in group]
+        totals: Dict[str, Dict[str, Any]] = {}
+        pmu_threads: List[Dict[str, Any]] = []
+        enabled = duration_s * 1_000_000_000
+        multiplier = 1.8 if load == "heavy" else 1.0
+        for thread_id, name in roster:
+            cycles = int(rng.randint(20_000_000, 80_000_000) * multiplier)
+            values = {
+                "cycles": cycles,
+                "instructions": int(cycles * (0.72 if load == "heavy" else 1.15)),
+                "branches": cycles // 6,
+                "branch_misses": cycles // (40 if load == "heavy" else 80),
+                "cache_references": cycles // 5,
+                "cache_misses": cycles // (19 if load == "heavy" else 45),
+            }
+            events = {}
+            for event in event_names:
+                count = values[event]
+                events[event] = {
+                    "raw": count, "scaled": float(count),
+                    "time_enabled_ns": enabled, "time_running_ns": enabled,
+                }
+                total = totals.setdefault(event, {
+                    "raw": 0, "scaled": 0.0,
+                    "time_enabled_ns": 0, "time_running_ns": 0,
+                })
+                total["raw"] += count
+                total["scaled"] += count
+                total["time_enabled_ns"] += enabled
+                total["time_running_ns"] += enabled
+            pmu_threads.append({
+                "tid": thread_id, "name": name, "start_time_ticks": thread_id,
+                "coverage_s": float(duration_s), "events": events,
+            })
+        builder.add_json(layout.PMU_COUNTERS, {
+            "schema_version": layout.SCHEMA_VERSION,
+            "kind": "pmu", "mode": "basic", "source": "perf_event_open",
+            "scope": "user", "status": "ok", "cpu_model": "Synthetic CPU",
+            "arch": "x86_64", "window_s": float(duration_s),
+            "thread_count_start": len(roster), "threads_measured": len(roster),
+            "events": event_names, "totals": totals, "threads": pmu_threads,
+            "warnings": [],
+        })
+        probes.append(ProbeResult(
+            name="pmu_basic", status="ok", duration_s=float(duration_s),
+            outputs=[layout.PMU_COUNTERS],
+        ))
+    elif pmu != "off":
+        raise PerformerError(f"unknown PMU mode {pmu!r}")
+
     target_died_at = None
     if degraded:
         for probe in probes:
@@ -822,7 +874,7 @@ def generate(
         target_died_at = started + _dt.timedelta(seconds=duration_s // 2 + 1)
 
     for probe in probes:
-        if probe.status == "skipped":
+        if probe.status == "skipped" or probe.name == "pmu_basic":
             continue
         lines = [f"Attaching {rng.randint(2, 9)} probes..."]
         for warning in probe.warnings:

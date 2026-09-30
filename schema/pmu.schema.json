@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Performer PMU counters",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "mode", "source", "scope", "status", "window_s", "threads_measured", "events", "totals", "threads", "warnings"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "pmu" },
+    "mode": { "const": "basic" },
+    "source": { "const": "perf_event_open" },
+    "scope": { "const": "user" },
+    "status": { "enum": ["ok", "partial", "failed"] },
+    "cpu_model": { "type": ["string", "null"] },
+    "arch": { "type": "string" },
+    "window_s": { "type": "number", "minimum": 0 },
+    "thread_count_start": { "type": "integer", "minimum": 0 },
+    "threads_measured": { "type": "integer", "minimum": 0 },
+    "events": { "type": "array", "items": { "type": "string" } },
+    "totals": { "$ref": "#/$defs/event_map" },
+    "threads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tid", "name", "start_time_ticks", "coverage_s", "events"],
+        "properties": {
+          "tid": { "type": "integer", "minimum": 1 },
+          "name": { "type": "string" },
+          "start_time_ticks": { "type": "integer", "minimum": 0 },
+          "coverage_s": { "type": "number", "minimum": 0 },
+          "events": { "$ref": "#/$defs/event_map" }
+        }
+      }
+    },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "event_map": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/event" }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw", "scaled", "time_enabled_ns", "time_running_ns"],
+      "properties": {
+        "raw": { "type": "integer", "minimum": 0 },
+        "scaled": { "type": ["number", "null"], "minimum": 0 },
+        "time_enabled_ns": { "type": "integer", "minimum": 0 },
+        "time_running_ns": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

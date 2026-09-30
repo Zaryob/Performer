@@ -230,12 +230,61 @@ def check_target(report: PreflightReport, pid: int) -> Check:
     report.thread_count = proc.thread_count(pid)
     report.comm = stat.comm if stat else proc.read_comm(pid)
     report.start_time_ticks = stat.start_time_ticks if stat else None
+    details = {"pid": pid, "comm": report.comm, "threads": report.thread_count}
+    workloads = launched_workloads(pid) if report.comm in LAUNCHERS else []
+    if workloads:
+        named = ", ".join(
+            f"{child} '{proc.read_comm(child) or '?'}' ({proc.thread_count(child)} threads)"
+            for child in workloads[:3]
+        )
+        return Check(
+            "target",
+            WARN,
+            f"pid {pid} is '{report.comm}', a launcher; the workload is probably "
+            f"its child: {named}",
+            hint=f"Pass --pid {workloads[0]} to profile the program itself.",
+            details={**details, "workload_pids": workloads},
+        )
     return Check(
         "target",
         PASS,
         f"pid {pid} is '{report.comm}' with {report.thread_count} threads",
-        details={"pid": pid, "comm": report.comm, "threads": report.thread_count},
+        details=details,
     )
+
+
+#: Processes that only start and wait for another one.  Profiling them
+#: measures a single thread sleeping in wait4(), which looks like a working
+#: but idle target: most probes attach and print nothing.
+LAUNCHERS = frozenset(
+    {
+        "sudo", "su", "doas", "pkexec", "runuser", "setsid", "nohup", "env",
+        "timeout", "time", "taskset", "numactl", "chrt", "nice", "ionice",
+        "stdbuf", "sh", "bash", "dash", "zsh", "fish",
+    }
+)
+
+
+def launched_workloads(pid: int, *, depth: int = 4) -> List[int]:
+    """The first non-launcher descendants of ``pid``, busiest first.
+
+    Walks through chains of launchers: sudo with ``use_pty`` forks a second
+    sudo that is the actual parent of the program.
+    """
+    found: List[int] = []
+    frontier = [pid]
+    for _ in range(depth):
+        next_frontier: List[int] = []
+        for parent in frontier:
+            for child in proc.child_pids(parent):
+                if proc.read_comm(child) in LAUNCHERS:
+                    next_frontier.append(child)
+                else:
+                    found.append(child)
+        if not next_frontier:
+            break
+        frontier = next_frontier
+    return sorted(found, key=lambda child: -proc.thread_count(child))
 
 
 def check_nofile(thread_count: int, cpu_count: int) -> Check:
@@ -531,8 +580,16 @@ def bpftrace_env() -> Dict[str, str]:
     above the defaults: 315 threads x several stacks each overflows the stock
     4096 easily.  Both spellings of the map limit are set because bpftrace
     renamed it; the unknown one is ignored harmlessly.
+
+    User symbols are cached because bpftrace, with ASLR on, otherwise
+    re-reads the target's symbol tables for every ``ustack`` it prints.
+    With thousands of off-CPU or futex stacks on a large C++ binary, the map
+    dump then outlasts the SIGINT timeout, the probe is SIGKILLed, and every
+    stack map is lost.  Caching is safe here: each probe traces one
+    long-running process whose address space does not move.
     """
     return {
+        "BPFTRACE_CACHE_USER_SYMBOLS": "1",
         "BPFTRACE_MAX_MAP_KEYS": "1048576",
         "BPFTRACE_MAP_KEYS_MAX": "1048576",
         "BPFTRACE_MAX_PROBES": "1024",

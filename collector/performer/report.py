@@ -54,6 +54,7 @@ class Summary:
     manifest: Dict[str, Any]
     flags: List[Flag] = field(default_factory=list)
     validation: Optional[ValidationReport] = None
+    pmu: Optional[Dict[str, Any]] = None
 
     @property
     def worst_level(self) -> Optional[str]:
@@ -183,10 +184,12 @@ def quality_flags(
 
 def build_summary(bundle: Bundle, *, validate: bool = True) -> Summary:
     report = bundle.validate() if validate else None
+    pmu = bundle.read_json(layout.PMU_COUNTERS) if layout.PMU_COUNTERS in bundle.paths() else None
     return Summary(
         manifest=bundle.manifest,
         flags=quality_flags(bundle.manifest),
         validation=report,
+        pmu=pmu,
     )
 
 
@@ -284,6 +287,35 @@ def render(summary: Summary, *, origin: Optional[str] = None, verbose: bool = Fa
     if isinstance(overhead, (int, float)):
         lines.append(_row("est. overhead", f"{overhead:.1f}%"))
 
+    if summary.pmu:
+        pmu = summary.pmu
+        totals = pmu.get("totals") or {}
+        lines.append("")
+        lines.append("hardware counters (user space)")
+        lines.append(_row("PMU status", str(pmu.get("status", "?"))))
+        lines.append(_row("threads measured", str(pmu.get("threads_measured", "?"))))
+        for name in ("cycles", "instructions", "branches", "branch_misses", "cache_references", "cache_misses"):
+            entry = totals.get(name)
+            if isinstance(entry, dict):
+                count = entry.get("scaled")
+                lines.append(_row(name.replace("_", " "), f"{count:,.0f}" if isinstance(count, (int, float)) else "unavailable"))
+        cycle_event = totals.get("cycles") or {}
+        instruction_event = totals.get("instructions") or {}
+        cycles = cycle_event.get("scaled")
+        instructions = instruction_event.get("scaled")
+        scheduled = all(
+            isinstance(event.get("time_enabled_ns"), (int, float))
+            and event["time_enabled_ns"] > 0
+            and event.get("time_running_ns", 0) / event["time_enabled_ns"] >= 0.9
+            for event in (cycle_event, instruction_event)
+        )
+        if scheduled and isinstance(cycles, (int, float)) and cycles > 0 and isinstance(instructions, (int, float)):
+            lines.append(_row("IPC", f"{instructions / cycles:.2f}"))
+        elif cycle_event or instruction_event:
+            lines.append(_row("IPC", "unavailable (counter quality)"))
+        for warning in pmu.get("warnings") or []:
+            lines.append(f"  [!] {warning}")
+
     files = doc.get("files") or []
     if files:
         lines.append("")
@@ -330,7 +362,7 @@ def render(summary: Summary, *, origin: Optional[str] = None, verbose: bool = Fa
 def summary_json(summary: Summary) -> Dict[str, Any]:
     doc = summary.manifest
     validation = summary.validation
-    return {
+    result = {
         "run_id": doc.get("run_id"),
         "label": doc.get("label"),
         "status": doc.get("status"),
@@ -347,6 +379,9 @@ def summary_json(summary: Summary) -> Dict[str, Any]:
         "schema_problems": [] if validation is None else validation.flat(),
         "files": doc.get("files", []),
     }
+    if summary.pmu is not None:
+        result["pmu"] = summary.pmu
+    return result
 
 
 def render_probe_names(doc: Dict[str, Any]) -> Sequence[str]:

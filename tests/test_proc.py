@@ -7,7 +7,9 @@ import unittest
 
 from performer import proc
 
-from .support import python_sleeper, requires_target, spawn_target
+from unittest import mock
+
+from .support import launcher_chain, python_sleeper, requires_target, spawn_target, wait_until
 
 
 class SelfTests(unittest.TestCase):
@@ -82,6 +84,12 @@ class CpuTests(unittest.TestCase):
         self.assertEqual(proc.overhead_pct(100.0, 110.0), 10.0)
         self.assertEqual(proc.overhead_pct(200.0, 260.0), 30.0)
 
+    def test_an_idle_baseline_does_not_inflate_overhead(self):
+        """0.7% -> 1.0% of a CPU is tick noise, not a 43% slowdown."""
+        self.assertLess(proc.overhead_pct(0.7, 1.0), 5.0)
+        # A genuine cost on an idle target still shows.
+        self.assertEqual(proc.overhead_pct(1.0, 6.0), 50.0)
+
     def test_overhead_never_goes_negative(self):
         # Tracing cannot make the target cheaper; a negative delta is noise.
         self.assertEqual(proc.overhead_pct(100.0, 90.0), 0.0)
@@ -109,6 +117,27 @@ class CpuTests(unittest.TestCase):
         self.assertAlmostEqual(
             proc.baseline_disagreement([{"cpu_pct": 100.0}, {"cpu_pct": 100.0}]), 0.0
         )
+
+
+class ChildTests(unittest.TestCase):
+    def setUp(self):
+        self.child = python_sleeper(30)
+        self.addCleanup(self.child.wait)
+        self.addCleanup(self.child.kill)
+
+    def test_children_are_listed(self):
+        self.assertIn(self.child.pid, proc.child_pids(os.getpid()))
+        self.assertEqual(proc.read_stat(self.child.pid).ppid, os.getpid())
+
+    def test_children_are_found_without_the_children_file(self):
+        """Kernels built without CONFIG_PROC_CHILDREN have no such file."""
+        original = proc._read_text
+
+        def without_children(path):
+            return None if path.name == "children" else original(path)
+
+        with mock.patch.object(proc, "_read_text", side_effect=without_children):
+            self.assertIn(self.child.pid, proc.child_pids(os.getpid()))
 
 
 class PidRecyclingTests(unittest.TestCase):

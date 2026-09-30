@@ -22,6 +22,7 @@ DIR_HIST = "hist"
 DIR_SERIES = "series"
 DIR_GRAPH = "graph"
 DIR_RAW = "raw"
+DIR_PMU = "pmu"
 
 BUNDLE_DIRS: Tuple[str, ...] = (
     DIR_META,
@@ -30,6 +31,7 @@ BUNDLE_DIRS: Tuple[str, ...] = (
     DIR_SERIES,
     DIR_GRAPH,
     DIR_RAW,
+    DIR_PMU,
 )
 
 # meta/
@@ -64,6 +66,7 @@ SERIES_SCHEDSTAT = f"{DIR_SERIES}/schedstat.csv"
 
 # graph/
 GRAPH_WAKEUP_EDGES = f"{DIR_GRAPH}/wakeup_edges.json"
+PMU_COUNTERS = f"{DIR_PMU}/counters.json"
 
 #: Column headers each series file must start with.  A run whose CSV header
 #: does not match is rejected: silently mis-parsed columns are worse than a
@@ -80,6 +83,7 @@ SCHEMA_FOR_PATH: Dict[str, str] = {
     META_TARGET: "target.schema.json",
     META_THREADS: "threads.schema.json",
     GRAPH_WAKEUP_EDGES: "wakeup_edges.schema.json",
+    PMU_COUNTERS: "pmu.schema.json",
 }
 
 #: Files under ``hist/`` carry a ``kind`` discriminator instead of having one

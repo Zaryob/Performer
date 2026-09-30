@@ -87,6 +87,7 @@ class Stat:
     utime_ticks: int
     stime_ticks: int
     start_time_ticks: int
+    ppid: int = 0
 
 
 def read_stat(pid: int, tid: Optional[int] = None) -> Optional[Stat]:
@@ -111,6 +112,7 @@ def read_stat(pid: int, tid: Optional[int] = None) -> Optional[Stat]:
             utime_ticks=int(fields[11]),
             stime_ticks=int(fields[12]),
             start_time_ticks=int(fields[19]),
+            ppid=int(fields[1]),
         )
     except (ValueError, IndexError):
         return None
@@ -148,6 +150,35 @@ def thread_ids(pid: int) -> List[int]:
         return sorted(int(name) for name in os.listdir(str(proc_path(pid, "task"))))
     except (FileNotFoundError, NotADirectoryError, PermissionError, ValueError, OSError):
         return []
+
+
+def child_pids(pid: int) -> List[int]:
+    """Direct children of a process, from any of its threads.
+
+    ``/proc/<pid>/task/<tid>/children`` is cheap but needs
+    CONFIG_PROC_CHILDREN; without it every process's parent is read instead.
+    """
+    children = set()
+    found_file = False
+    for tid in thread_ids(pid):
+        raw = _read_text(task_path(pid, tid, "children"))
+        if raw is None:
+            continue
+        found_file = True
+        children.update(int(part) for part in raw.split() if part.isdigit())
+    if found_file:
+        return sorted(children)
+    try:
+        names = os.listdir(str(PROC))
+    except OSError:
+        return []
+    for name in names:
+        if not name.isdigit():
+            continue
+        stat = read_stat(int(name))
+        if stat is not None and stat.ppid == pid:
+            children.add(stat.pid)
+    return sorted(children)
 
 
 def thread_count(pid: int) -> int:
@@ -373,10 +404,21 @@ def overhead_pct(baseline_pct: Optional[float], during_pct: Optional[float]) -> 
     Expressed relative to the baseline, so it reads as "the workload became N%
     more expensive". Negative results clamp to zero: tracing cannot make the
     target cheaper, so a negative number is baseline noise.
+
+    The baseline is floored at :data:`OVERHEAD_BASELINE_FLOOR_PCT`.  A mostly
+    idle target at 0.7% of a CPU that reads 1.0% while traced is not "43%
+    more expensive" -- a third of a percent of one CPU is noise in a
+    ``/proc`` tick count, and dividing by a near-zero baseline turns it into
+    a red error.
     """
     if not baseline_pct or during_pct is None or baseline_pct <= 0:
         return 0.0
-    return max(0.0, round(100.0 * (during_pct - baseline_pct) / baseline_pct, 2))
+    base = max(baseline_pct, OVERHEAD_BASELINE_FLOOR_PCT)
+    return max(0.0, round(100.0 * (during_pct - baseline_pct) / base, 2))
+
+
+#: Smallest baseline, in percent of one CPU, that overhead is measured against.
+OVERHEAD_BASELINE_FLOOR_PCT = 10.0
 
 
 def cpu_pct_between(

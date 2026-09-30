@@ -97,6 +97,10 @@ def _build_parser() -> argparse.ArgumentParser:
     collect.add_argument(
         "--bpftrace", default=None, help="path to the bpftrace binary to use"
     )
+    collect.add_argument(
+        "--pmu", choices=("off", "basic"), default="off",
+        help="optional hardware counters (default: off)",
+    )
     collect.set_defaults(func=_cmd_collect)
 
     preflight = sub.add_parser(
@@ -191,6 +195,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     fake.add_argument("--tag", action="append", default=[], dest="tags")
     fake.add_argument("--notes", default="")
+    fake.add_argument("--pmu", choices=("off", "basic"), default="off")
     fake.add_argument(
         "--degraded",
         action="store_true",
@@ -330,6 +335,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
         pack=not args.no_pack,
         annotate_kernel=args.annotate_kernel,
         bpftrace=args.bpftrace,
+        pmu=args.pmu,
     )
     result = collect(options)
     print()
@@ -411,6 +417,7 @@ def _cmd_fake_run(args: argparse.Namespace) -> int:
         tags=args.tags or ["synthetic"],
         notes=args.notes,
         pack=not args.no_pack,
+        pmu=args.pmu,
     )
     print(f"run directory: {run_dir}")
     if archive != run_dir:

@@ -9,7 +9,16 @@ from unittest import mock
 
 from performer import preflight, profiles
 
-from .support import fake_bpftrace, python_sleeper, requires_target, spawn_target
+from performer import proc
+
+from .support import (
+    fake_bpftrace,
+    launcher_chain,
+    python_sleeper,
+    requires_target,
+    spawn_target,
+    wait_until,
+)
 
 #: A one probe profile: these tests are about the checks, not the probe set,
 #: and every extra probe costs another trial run.
@@ -21,6 +30,15 @@ PROFILE = profiles.Profile(
     expected_overhead="< 3%",
 )
 FAST = {"trial_seconds": 0.2, "attach_grace_s": 0.5}
+
+
+def _kill_tree(pid: int) -> None:
+    for child in proc.child_pids(pid):
+        _kill_tree(child)
+    try:
+        os.kill(pid, 9)
+    except ProcessLookupError:
+        pass
 
 
 class IndividualCheckTests(unittest.TestCase):
@@ -35,6 +53,30 @@ class IndividualCheckTests(unittest.TestCase):
         self.assertEqual(check.status, preflight.FAIL)
         self.assertIn("no process with pid", check.message)
         self.assertIsNotNone(check.hint)
+
+    def test_a_launcher_target_names_the_workload(self):
+        """Handing over sudo's pid profiles one thread sleeping in wait4()."""
+        chain = launcher_chain(30)
+        self.addCleanup(chain.wait)
+        self.addCleanup(_kill_tree, chain.pid)
+        self.assertTrue(
+            wait_until(lambda: preflight.launched_workloads(chain.pid), timeout=5.0)
+        )
+        workload = preflight.launched_workloads(chain.pid)[0]
+        report = preflight.PreflightReport()
+        check = preflight.check_target(report, chain.pid)
+        self.assertEqual(check.status, preflight.WARN)
+        self.assertIn("launcher", check.message)
+        self.assertEqual(check.details["workload_pids"], [workload])
+        self.assertIn(f"--pid {workload}", check.hint)
+        self.assertNotIn(proc.read_comm(workload), preflight.LAUNCHERS)
+
+    def test_a_plain_process_is_not_a_launcher(self):
+        child = python_sleeper(30)
+        self.addCleanup(child.wait)
+        self.addCleanup(child.kill)
+        check = preflight.check_target(preflight.PreflightReport(), child.pid)
+        self.assertEqual(check.status, preflight.PASS)
 
     def test_bpftrace_version_is_parsed(self):
         with fake_bpftrace(version="0.20.2"):
@@ -240,6 +282,10 @@ class BpftraceEnvTests(unittest.TestCase):
         env = preflight.bpftrace_env()
         self.assertEqual(env["BPFTRACE_MAX_MAP_KEYS"], env["BPFTRACE_MAP_KEYS_MAX"])
         self.assertGreater(int(env["BPFTRACE_MAX_MAP_KEYS"]), 4096)
+
+    def test_user_symbols_are_cached(self):
+        """Uncached, a large ustack dump outlasts the SIGINT timeout."""
+        self.assertEqual(preflight.bpftrace_env()["BPFTRACE_CACHE_USER_SYMBOLS"], "1")
 
 
 if __name__ == "__main__":

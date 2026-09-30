@@ -392,12 +392,22 @@ def parse_oncpu(
     """bpftrace stdout -> (folded entries, quality stats, warnings)."""
     result = parse_maps(text)
     entries = result.entries(map_name)
-    if not entries and result.maps:
-        # The probe was edited and the map renamed: use whatever it produced
-        # rather than reporting an empty profile.
-        name, entries = next(iter(result.maps.items()))
-        result.warnings.append(
-            f"expected map '@{map_name}', found '@{name}'; used it instead"
-        )
+    if not entries and map_name not in result.maps:
+        # The probe was edited and the map renamed: use another stack map
+        # rather than reporting an empty profile.  Only a stack keyed one --
+        # a plain value map such as '@offcpu_by_state' folds into nonsense,
+        # and its absence usually means bpftrace was killed mid dump.
+        stack_maps = [
+            (name, candidates)
+            for name, candidates in result.maps.items()
+            if any(
+                isinstance(key, StackKey) for entry in candidates for key in entry.keys
+            )
+        ]
+        if stack_maps:
+            name, entries = stack_maps[0]
+            result.warnings.append(
+                f"expected map '@{map_name}', found '@{name}'; used it instead"
+            )
     folded, stats = fold_oncpu(entries, annotate_kernel=annotate_kernel)
     return folded, stats, result.warnings

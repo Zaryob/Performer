@@ -58,6 +58,8 @@ run_20260806T142530Z_baseline/
 │   └── schedstat.csv
 ├── graph/
 │   └── wakeup_edges.json
+├── pmu/
+│   └── counters.json         optional per-thread hardware counters and quality
 └── raw/
     └── <probe>.stderr.log   every probe's stderr, verbatim
 ```
@@ -72,6 +74,12 @@ Rules that hold for every bundle:
   a valid bundle, with `status: "failed"`.
 * Everything except `manifest.json` is listed in `manifest.files[]` with size
   and `sha256`.
+
+`pmu/counters.json` is present only for `--pmu basic`. Its schema is
+[`schema/pmu.schema.json`](../schema/pmu.schema.json). It stores user-space
+counter totals, per-thread counts, raw and scaled values, scheduling times,
+coverage, and warnings. `pmu_basic` in `manifest.probes[]` records the source
+status. See [PMU counters](pmu.md) for interpretation limits.
 
 ## manifest.json
 

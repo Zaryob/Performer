@@ -141,9 +141,10 @@ $ performer preflight --pid 205852                               # just the chec
 
 ### Ubuntu packages
 
-GitHub Actions and GitLab CI build separate `performer-collector` `.deb`
-artifacts on Ubuntu 22.04 and 24.04. Each job runs the collector tests, installs
-its package, and validates a synthetic bundle through the installed command.
+GitHub Actions and GitLab CI run the collector tests on every branch except
+`main`. After a merge to `main`, they build separate `performer-collector` `.deb`
+artifacts on Ubuntu 22.04 and 24.04; each package job installs its package and
+validates a synthetic bundle through the installed command.
 Download the artifact for the target release and install it with
 `sudo apt install ./performer-collector_*.deb`. The package contains the
 collector, profiles, probes, and schemas; it installs `performer` on `PATH`.
@@ -153,6 +154,13 @@ The offline viewer remains available through the root Docker Compose file or
 To build locally on the matching Ubuntu release, run
 `bash packaging/build-deb.sh 22.04` or `bash packaging/build-deb.sh 24.04`.
 The result is written to `dist/`.
+
+### Hardware counters
+
+Add `--pmu basic` to `collect` to count user-space CPU cycles, instructions,
+branches, and generic cache events alongside the selected eBPF profile. PMU
+data appears in the offline viewer's Overview, Threads, and Diff screens.
+See [PMU counters](pmu.md) for coverage and quality rules.
 
 ## Quick start without a target
 

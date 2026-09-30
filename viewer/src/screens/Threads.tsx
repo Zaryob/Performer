@@ -19,19 +19,24 @@ import type { Bundle } from "../bundle/load";
 import { runDuration } from "../bundle/load";
 import type { Schedstat, ThreadsDoc } from "../bundle/types";
 import { Empty, Panel } from "../components/ui";
+import { ratio, readPmu, value } from "../pmu";
 
 interface Row {
+  key: string;
   tid: number;
   name: string;
-  cpuMs: number;
-  waitMs: number;
-  timeslices: number;
+  cpuMs: number | null;
+  waitMs: number | null;
+  timeslices: number | null;
   voluntary: number | null;
   involuntary: number | null;
   lifecycle: string;
+  pmuCycles: number | null;
+  pmuIpc: number | null;
+  pmuCoverage: number | null;
 }
 
-type SortKey = keyof Row;
+type SortKey = Exclude<keyof Row, "key">;
 
 const COLUMNS: { key: SortKey; label: string; numeric: boolean; title?: string }[] = [
   { key: "tid", label: "tid", numeric: true },
@@ -52,6 +57,9 @@ const COLUMNS: { key: SortKey; label: string; numeric: boolean; title?: string }
   { key: "voluntary", label: "vol ctxsw", numeric: true },
   { key: "involuntary", label: "invol ctxsw", numeric: true },
   { key: "lifecycle", label: "lifecycle", numeric: false },
+  { key: "pmuCycles", label: "PMU cycles", numeric: true, title: "user-space cycles measured for this thread" },
+  { key: "pmuIpc", label: "IPC", numeric: true, title: "instructions per cycle; hidden if counter scheduling was poor" },
+  { key: "pmuCoverage", label: "PMU s", numeric: true, title: "seconds this thread had PMU counters attached" },
 ];
 
 function delta(
@@ -77,14 +85,28 @@ export function Threads({
   const [sortKey, setSortKey] = useState<SortKey>("cpuMs");
   const [ascending, setAscending] = useState(false);
   const [filter, setFilter] = useState("");
+  const hasPmu = readPmu(bundle) !== null;
+  const columns = hasPmu ? COLUMNS : COLUMNS.filter((column) => !column.key.startsWith("pmu"));
 
   const rows = useMemo<Row[]>(() => {
     const doc = bundle.threads;
-    if (!doc) return [];
-    return Object.entries(doc.threads).map(([tid, entry]) => {
+    const measured = readPmu(bundle)?.threads ?? [];
+    const pmuThreads = new Map<number, (NonNullable<ReturnType<typeof readPmu>>)["threads"]>();
+    for (const thread of measured) {
+      const matching = pmuThreads.get(thread.tid) ?? [];
+      matching.push(thread);
+      pmuThreads.set(thread.tid, matching);
+    }
+    const matched = new Set<string>();
+    const rows: Row[] = Object.entries(doc?.threads ?? {}).map(([tid, entry]) => {
       const start = entry.start_schedstat;
       const end = entry.end_schedstat;
+      const candidates = pmuThreads.get(Number(tid)) ?? [];
+      const onlyCandidate = candidates.length === 1 ? candidates[0] : undefined;
+      const pmu = onlyCandidate?.name === entry.name ? onlyCandidate : null;
+      if (pmu) matched.add(`${pmu.tid}:${pmu.start_time_ticks}`);
       return {
+        key: tid,
         tid: Number(tid),
         name: entry.name,
         cpuMs: delta(start, end, "run_ns") / 1e6,
@@ -97,8 +119,30 @@ export function Threads({
           : entry.first_seen === "end"
             ? "started mid-run"
             : "present throughout",
+        pmuCycles: pmu ? value(pmu.events.cycles) : null,
+        pmuIpc: pmu ? ratio(pmu.events.instructions, pmu.events.cycles) : null,
+        pmuCoverage: pmu?.coverage_s ?? null,
       };
     });
+    for (const thread of measured) {
+      const key = `${thread.tid}:${thread.start_time_ticks}`;
+      if (matched.has(key)) continue;
+      rows.push({
+        key,
+        tid: thread.tid,
+        name: thread.name,
+        cpuMs: null,
+        waitMs: null,
+        timeslices: null,
+        voluntary: null,
+        involuntary: null,
+        lifecycle: "PMU only",
+        pmuCycles: value(thread.events.cycles),
+        pmuIpc: ratio(thread.events.instructions, thread.events.cycles),
+        pmuCoverage: thread.coverage_s,
+      });
+    }
+    return rows;
   }, [bundle]);
 
   const visible = useMemo(() => {
@@ -122,11 +166,11 @@ export function Threads({
   }, [rows, filter, sortKey, ascending]);
 
   if (!rows.length) {
-    return <Empty>This bundle has no thread inventory (meta/threads.json).</Empty>;
+    return <Empty>This bundle has no thread inventory or PMU thread counts.</Empty>;
   }
 
   const totals = visible.reduce(
-    (acc, row) => ({ cpu: acc.cpu + row.cpuMs, wait: acc.wait + row.waitMs }),
+    (acc, row) => ({ cpu: acc.cpu + (row.cpuMs ?? 0), wait: acc.wait + (row.waitMs ?? 0) }),
     { cpu: 0, wait: 0 },
   );
 
@@ -155,13 +199,14 @@ export function Threads({
       <p className="mb-2 text-xs text-slate-500">
         From <code>/proc</code>, so these numbers survive even when every probe
         failed. CPU and runqueue times are the difference between the snapshots
-        taken at each end of the run.
+        taken at each end of the run. PMU-only rows were measured between those
+        snapshots or could not be safely matched by thread identity.
       </p>
       <div className="max-h-[32rem] overflow-auto">
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-slate-900 text-left text-xs uppercase tracking-wide text-slate-400">
             <tr>
-              {COLUMNS.map((column) => (
+              {columns.map((column) => (
                 <th
                   key={column.key}
                   title={column.title}
@@ -178,19 +223,19 @@ export function Threads({
           </thead>
           <tbody>
             {visible.map((row) => (
-              <tr key={row.tid} className="border-t border-slate-800">
+              <tr key={row.key} className="border-t border-slate-800">
                 <td className="py-1 pr-3 text-right tabular-nums text-slate-400">
                   {row.tid}
                 </td>
                 <td className="py-1 pr-3 font-mono text-slate-100">{row.name}</td>
                 <td className="py-1 pr-3 text-right tabular-nums text-slate-200">
-                  {row.cpuMs.toFixed(1)}
+                  {row.cpuMs?.toFixed(1) ?? "—"}
                 </td>
                 <td className="py-1 pr-3 text-right tabular-nums text-slate-300">
-                  {row.waitMs.toFixed(1)}
+                  {row.waitMs?.toFixed(1) ?? "—"}
                 </td>
                 <td className="py-1 pr-3 text-right tabular-nums text-slate-400">
-                  {row.timeslices.toLocaleString()}
+                  {row.timeslices?.toLocaleString() ?? "—"}
                 </td>
                 <td className="py-1 pr-3 text-right tabular-nums text-slate-400">
                   {row.voluntary?.toLocaleString() ?? "—"}
@@ -199,6 +244,11 @@ export function Threads({
                   {row.involuntary?.toLocaleString() ?? "—"}
                 </td>
                 <td className="py-1 text-slate-400">{row.lifecycle}</td>
+                {hasPmu && <>
+                  <td className="py-1 pr-3 text-right tabular-nums text-slate-300">{row.pmuCycles?.toLocaleString() ?? "—"}</td>
+                  <td className="py-1 pr-3 text-right tabular-nums text-slate-300">{row.pmuIpc?.toFixed(2) ?? "—"}</td>
+                  <td className="py-1 pr-3 text-right tabular-nums text-slate-300">{row.pmuCoverage?.toFixed(1) ?? "—"}</td>
+                </>}
               </tr>
             ))}
           </tbody>
@@ -213,7 +263,7 @@ export function Threads({
               <td className="py-1 pr-3 text-right tabular-nums">
                 {totals.wait.toFixed(0)}
               </td>
-              <td colSpan={4} />
+              <td colSpan={hasPmu ? 7 : 4} />
             </tr>
           </tfoot>
         </table>

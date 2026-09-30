@@ -5,6 +5,7 @@ import type { Bundle } from "../bundle/load";
 import { runDuration } from "../bundle/load";
 import { qualityFlags } from "../quality";
 import { verdict as computeVerdict, type Verdict } from "../analysis";
+import { PmuSummary } from "../components/PmuSummary";
 import {
   Field,
   FlagList,
@@ -94,6 +95,8 @@ export function Overview({ bundle }: { bundle: Bundle }) {
         </dl>
         <FlagList flags={flags} />
       </Panel>
+
+      <div className="lg:col-span-2"><PmuSummary bundle={bundle} /></div>
 
       <Panel title="Probes">
         <table className="w-full text-sm">

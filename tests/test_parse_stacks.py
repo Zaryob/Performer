@@ -156,6 +156,13 @@ class EdgeCaseTests(unittest.TestCase):
         self.assertEqual(folded, [("w;g;f", 4)])
         self.assertTrue(any("found '@samples'" in w for w in warnings), warnings)
 
+    def test_a_plain_value_map_is_never_folded_as_stacks(self):
+        """A SIGKILL mid dump leaves only the small maps; they are not stacks."""
+        text = "@offcpu_by_state[1]: 6041210\n@offcpu_by_state[2]: 38900\n"
+        folded, _stats, warnings = parse_oncpu(text, map_name="offcpu_us")
+        self.assertEqual(folded, [])
+        self.assertFalse(any("used it instead" in w for w in warnings), warnings)
+
     def test_stats_values_are_left_to_the_histogram_parser(self):
         """One probe prints both shapes; neither parser may warn about the other."""
         text = "@cpu[\n    f+1\n, \n    g+2\n, w]: count 4, average 2\n"
