@@ -7,7 +7,9 @@ import unittest
 
 from performer import proc
 
-from .support import python_sleeper, requires_target, spawn_target
+from unittest import mock
+
+from .support import launcher_chain, python_sleeper, requires_target, spawn_target, wait_until
 
 
 class SelfTests(unittest.TestCase):
@@ -109,6 +111,27 @@ class CpuTests(unittest.TestCase):
         self.assertAlmostEqual(
             proc.baseline_disagreement([{"cpu_pct": 100.0}, {"cpu_pct": 100.0}]), 0.0
         )
+
+
+class ChildTests(unittest.TestCase):
+    def setUp(self):
+        self.child = python_sleeper(30)
+        self.addCleanup(self.child.wait)
+        self.addCleanup(self.child.kill)
+
+    def test_children_are_listed(self):
+        self.assertIn(self.child.pid, proc.child_pids(os.getpid()))
+        self.assertEqual(proc.read_stat(self.child.pid).ppid, os.getpid())
+
+    def test_children_are_found_without_the_children_file(self):
+        """Kernels built without CONFIG_PROC_CHILDREN have no such file."""
+        original = proc._read_text
+
+        def without_children(path):
+            return None if path.name == "children" else original(path)
+
+        with mock.patch.object(proc, "_read_text", side_effect=without_children):
+            self.assertIn(self.child.pid, proc.child_pids(os.getpid()))
 
 
 class PidRecyclingTests(unittest.TestCase):

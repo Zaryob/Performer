@@ -144,6 +144,20 @@ def python_sleeper(seconds: float = 30.0) -> subprocess.Popen:
     )
 
 
+def launcher_chain(seconds: float = 30.0) -> subprocess.Popen:
+    """sh -> sh -> python, like sudo -> sudo -> program under ``use_pty``.
+
+    The trailing ``; true`` keeps each shell from exec'ing its command, so the
+    shells stay in the process tree as parents.
+    """
+    inner = f"{sys.executable} -c 'import time; time.sleep({seconds})'; true"
+    return subprocess.Popen(
+        ["sh", "-c", f'sh -c "{inner}"; true'],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 def wait_until(predicate, timeout: float = 5.0, interval: float = 0.02) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

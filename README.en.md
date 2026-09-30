@@ -24,6 +24,8 @@ The Linux target needs Python 3.8+, `bpftrace`, and eBPF privileges:
 sudo ./collector/bin/performer collect --pid PID --duration 30 --profile standard --label baseline --out runs
 ```
 
+`PID` must be the program's own pid: if it was started as `sudo ./app`, use
+the child's pid, not sudo's (`pgrep -f app` or `pstree -p`).
 Preflight stops before collection when a required tool or probe file is missing.
 If some probes work, failures in the others are recorded as warnings.
 GitHub and GitLab CI produce `performer-collector` `.deb` files for Ubuntu
