@@ -530,3 +530,26 @@ class CliCollectTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InterruptGuardTests(unittest.TestCase):
+    def test_a_second_ctrl_c_does_not_kill_the_collector(self):
+        """bpftrace may still be writing its maps; a KeyboardInterrupt would lose them."""
+        import os
+        import signal
+        import threading
+        import time
+
+        from performer.collect import _interrupt_guard
+
+        event = threading.Event()
+        messages = []
+        with _interrupt_guard(event, messages.append):
+            os.kill(os.getpid(), signal.SIGINT)
+            time.sleep(0.05)
+            os.kill(os.getpid(), signal.SIGINT)
+            time.sleep(0.05)
+        self.assertTrue(event.is_set())
+        self.assertEqual(len(messages), 2)
+        self.assertIn("interrupted", messages[0])
+        self.assertIn("already stopping", messages[1])

@@ -30,6 +30,7 @@ from .errors import PerformerError, PreflightError
 from .profiles import Profile
 from .runner import (
     ATTACH_GRACE_S,
+    SIGINT_TIMEOUT_S,
     ProbeProcess,
     SeriesSampler,
     TargetWatcher,
@@ -194,6 +195,9 @@ def _collect(
     sampler.start()
 
     outcome = None
+    # The guard stays up until every probe has exited: bpftrace writes its
+    # maps only after SIGINT, which can take a minute, and a second Ctrl-C in
+    # that minute must not kill the collector and lose them.
     with _interrupt_guard(interrupted, printer):
         outcome = wait_for_run(
             duration_s=options.duration_s,
@@ -201,17 +205,23 @@ def _collect(
             probes=[p for _spec, p in launched],
             interrupted=interrupted,
         )
-    # Closed together, for the same reason they were opened together.
-    elapsed = time.monotonic() - run_started
-    if pmu_session is not None:
-        pmu_session.stop()
-    ticks_end = proc.cpu_ticks(options.pid)
+        # Closed together, for the same reason they were opened together.
+        elapsed = time.monotonic() - run_started
+        if pmu_session is not None:
+            pmu_session.stop()
+        ticks_end = proc.cpu_ticks(options.pid)
 
-    # ---- stop everything --------------------------------------------
-    printer(f"stopping probes after {elapsed:.1f}s ({outcome.reason})")
-    sampler.stop()
-    watcher.stop()
-    stop_all([probe for _spec, probe in launched])
+        # ---- stop everything ----------------------------------------
+        printer(f"stopping probes after {elapsed:.1f}s ({outcome.reason})")
+        sampler.stop()
+        watcher.stop()
+        stop_all(
+            [probe for _spec, probe in launched],
+            progress=lambda waiting, waited: printer(
+                f"  still writing maps after {waited:.0f}s: {', '.join(waiting)} "
+                f"(SIGKILL at {SIGINT_TIMEOUT_S:.0f}s would lose them; please wait)"
+            ),
+        )
 
     threads_end = proc.snapshot_threads(options.pid)
     ended_at = manifest_mod.utc_now()
@@ -405,6 +415,11 @@ class _interrupt_guard:
         def _handler(_signum, _frame):
             if not self.event.is_set():
                 self.printer("interrupted: stopping probes and writing the bundle")
+            else:
+                self.printer(
+                    "  already stopping: bpftrace is writing its maps, and stopping "
+                    "it now would lose them"
+                )
             self.event.set()
 
         try:

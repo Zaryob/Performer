@@ -34,8 +34,13 @@ from . import proc
 ATTACH_GRACE_S = 2.0
 
 #: bpftrace can take a while to walk and print large maps on SIGINT; with a
-#: 315 thread process the stack map is big, so this is generous on purpose.
-SIGINT_TIMEOUT_S = 30.0
+#: 315 thread process the stack maps are big and every user stack has to be
+#: symbolised, so this is generous on purpose.  Escalating costs every map the
+#: probe holds; waiting longer costs only time.
+SIGINT_TIMEOUT_S = 90.0
+
+#: How often :func:`stop_all` reports probes that are still writing.
+STOP_PROGRESS_EVERY_S = 10.0
 SIGTERM_TIMEOUT_S = 5.0
 
 _LOST_EVENTS_RE = re.compile(r"[Ll]ost\s+(\d+)\s+events?")
@@ -67,6 +72,7 @@ class ProbeProcess:
     _started_at: float = field(default=0.0, init=False, repr=False)
     _exit: Optional[ExitInfo] = field(default=None, init=False, repr=False)
     _sigint_sent: bool = field(default=False, init=False, repr=False)
+    _sigint_at: float = field(default=0.0, init=False, repr=False)
 
     # -- lifecycle ------------------------------------------------------
 
@@ -173,6 +179,7 @@ class ProbeProcess:
         if self._exit is None and self._proc is not None and self._proc.poll() is None:
             self._signal_group(signal.SIGINT)
             self._sigint_sent = True
+            self._sigint_at = time.monotonic()
 
     def stop(
         self,
@@ -193,11 +200,13 @@ class ProbeProcess:
         else:
             if not self._sigint_sent:
                 self._signal_group(signal.SIGINT)
+                self._sigint_at = time.monotonic()
             if self._wait(sigint_timeout):
                 reason = "sigint"
             else:
+                waited = time.monotonic() - self._sigint_at
                 self.warnings.append(
-                    f"still running {sigint_timeout:.0f}s after SIGINT; escalated to "
+                    f"still running {waited:.0f}s after SIGINT; escalated to "
                     "SIGTERM, so some maps may be missing"
                 )
                 self._signal_group(signal.SIGTERM)
@@ -284,6 +293,9 @@ def stop_all(
     *,
     sigint_timeout: float = SIGINT_TIMEOUT_S,
     sigterm_timeout: float = SIGTERM_TIMEOUT_S,
+    progress: Optional[Callable[[List[str], float], None]] = None,
+    progress_every_s: float = STOP_PROGRESS_EVERY_S,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     """End every probe at the same instant, then wait for them one by one.
 
@@ -291,9 +303,28 @@ def stop_all(
     as long as the earlier ones take to write their maps -- which, with a large
     stack map, is seconds. Every probe would then cover a different window
     while the manifest recorded one duration for all of them.
+
+    ``progress`` is called every ``progress_every_s`` with the probes still
+    writing and the seconds since SIGINT.  A dump that takes a minute looks
+    exactly like a hang otherwise, and an operator who presses Ctrl-C again or
+    kills the collector loses what the dump would have produced.
     """
     for probe in probes:
         probe.signal_stop()
+    if progress is not None:
+        started = time.monotonic()
+        next_report = started + progress_every_s
+        while True:
+            waiting = [probe.name for probe in probes if probe.alive]
+            now = time.monotonic()
+            if not waiting or now - started >= sigint_timeout:
+                break
+            if now >= next_report:
+                progress(waiting, now - started)
+                next_report += progress_every_s
+            sleep(0.2)
+        # The SIGINT window is shared: the probes were signalled together.
+        sigint_timeout = max(0.0, sigint_timeout - (time.monotonic() - started))
     for probe in probes:
         probe.stop(sigint_timeout=sigint_timeout, sigterm_timeout=sigterm_timeout)
 

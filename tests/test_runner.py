@@ -15,6 +15,7 @@ from performer.runner import (
     SeriesSampler,
     TargetWatcher,
     scan_stderr,
+    stop_all,
     wait_for_run,
 )
 
@@ -75,6 +76,35 @@ class ProbeProcessTests(unittest.TestCase):
         self.assertTrue(
             any("escalated to SIGTERM" in w for w in probe.warnings), probe.warnings
         )
+
+    def test_a_slow_dump_is_reported_while_it_runs(self):
+        """A minute of silence after Ctrl-C looks like a hang; say what is happening."""
+        probe = self._probe("ignore_sigint")
+        probe.start()
+        self.assertTrue(probe.wait_for_attach(1.0))
+        reports = []
+        stop_all(
+            [probe],
+            sigint_timeout=0.8,
+            sigterm_timeout=2.0,
+            progress=lambda waiting, waited: reports.append((waiting, waited)),
+            progress_every_s=0.2,
+        )
+        self.assertTrue(reports)
+        self.assertEqual(reports[0][0], ["oncpu"])
+        self.assertEqual(probe.exit_info.reason, "sigterm")
+        # The shared SIGINT window is not granted twice.
+        self.assertTrue(any("still running 1s after SIGINT" in w for w in probe.warnings),
+                        probe.warnings)
+
+    def test_a_quick_stop_reports_nothing(self):
+        probe = self._probe("normal")
+        probe.start()
+        self.assertTrue(probe.wait_for_attach(1.0))
+        reports = []
+        stop_all([probe], progress=lambda *args: reports.append(args), progress_every_s=5.0)
+        self.assertEqual(reports, [])
+        self.assertEqual(probe.exit_info.reason, "sigint")
 
     def test_escalates_to_sigkill_and_says_the_data_is_gone(self):
         probe = self._probe("stubborn")
