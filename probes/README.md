@@ -40,8 +40,14 @@ seconds, and any further `$N` are thresholds supplied by the profile.
   is reported.
 * **bpftrace dumps its maps on SIGINT and at no other time.** A probe that
   does not receive SIGINT produces nothing, however long it ran.
-* **Clear scratch maps in `END`.** Per-thread bookkeeping maps would otherwise
-  be printed alongside the results and parsed as data.
+* **No `BEGIN` or `END` blocks.** bpftrace implements them as uprobes on its
+  own binary (`BEGIN_trigger`, `END_trigger`). A stripped bpftrace, such as
+  the 0.14.0 package in Ubuntu 22.04, cannot resolve those symbols. It fails
+  on SIGINT with `Could not resolve symbol: /proc/self/exe:END_trigger` and
+  exits without printing any maps.
+* **Prefix scratch maps with `_`.** Per-thread bookkeeping maps (`@_off_start`,
+  `@_queued_at`, ...) are still printed on exit, because clearing them would
+  need an `END` block. The parsers drop every map whose name starts with `_`.
 
 ## Costs
 

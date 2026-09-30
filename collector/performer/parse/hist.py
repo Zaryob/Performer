@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from .. import layout
+from . import strip_scratch_maps
 
 #: ``@name:`` or ``@name[key]:`` at column zero opens a map.
 _HEADER_RE = re.compile(r"^@([A-Za-z_][A-Za-z0-9_]*)?(?:\[(.*)\])?:\s*(.*)$")
@@ -150,7 +151,7 @@ def _parse_stats(text: str) -> Optional[Dict[str, float]]:
 def parse_maps(text: str) -> MapDump:
     """Scan a probe's stdout for every map it printed."""
     dump = MapDump()
-    lines = text.splitlines()
+    lines = strip_scratch_maps(text).splitlines()
     index = 0
     current_name: Optional[str] = None
     current_series: Optional[Series] = None

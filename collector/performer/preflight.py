@@ -404,9 +404,14 @@ def _cleanup(directory: Path, temporary: bool) -> None:
         pass
 
 
-def check_frame_pointers(report: PreflightReport, pid: int, **kwargs) -> Check:
+def check_frame_pointers(
+    report: PreflightReport, pid: int, *, trial: Optional[TrialResult] = None, **kwargs
+) -> Check:
     """Two seconds of sampling, then count the frames nobody could name."""
-    trial = run_trial(profiles.ONCPU, pid, bpftrace=report.bpftrace_path or "bpftrace", **kwargs)
+    if trial is None:
+        trial = run_trial(
+            profiles.ONCPU, pid, bpftrace=report.bpftrace_path or "bpftrace", **kwargs
+        )
     if not trial.ran:
         return Check(
             "frame_pointers",
@@ -463,11 +468,28 @@ def check_frame_pointers(report: PreflightReport, pid: int, **kwargs) -> Check:
     )
 
 
-def check_smoke(report: PreflightReport, profile: Profile, pid: int, **kwargs) -> List[Check]:
-    """Run every probe briefly; anything silent is disabled, never skipped quietly."""
+def check_smoke(
+    report: PreflightReport,
+    profile: Profile,
+    pid: int,
+    *,
+    reuse: Optional[Dict[str, TrialResult]] = None,
+    **kwargs,
+) -> List[Check]:
+    """Run every probe briefly; anything silent is disabled, never skipped quietly.
+
+    ``reuse`` maps a probe name to a trial that already ran it: the frame
+    pointer trial is an oncpu run, and on a mostly idle target a second two
+    second sample can easily catch nothing and disable a probe that just
+    worked.
+    """
     checks: List[Check] = []
     for spec in profile.probes:
-        trial = run_trial(spec, pid, bpftrace=report.bpftrace_path or "bpftrace", **kwargs)
+        trial = (reuse or {}).get(spec.name)
+        if trial is None:
+            trial = run_trial(
+                spec, pid, bpftrace=report.bpftrace_path or "bpftrace", **kwargs
+            )
         produced = trial.produced_data
         report.smoke[spec.name] = produced
         report.smoke_warnings[spec.name] = trial.warnings
@@ -584,8 +606,15 @@ def run_preflight(
             "seconds": trial_seconds,
             "attach_grace_s": attach_grace_s,
         }
-        report.add(check_frame_pointers(report, pid, **trial_kwargs))
-        for check in check_smoke(report, profile, pid, **trial_kwargs):
+        oncpu_trial = run_trial(
+            profiles.ONCPU,
+            pid,
+            bpftrace=report.bpftrace_path or "bpftrace",
+            **trial_kwargs,
+        )
+        report.add(check_frame_pointers(report, pid, trial=oncpu_trial))
+        reuse = {profiles.ONCPU.name: oncpu_trial} if oncpu_trial.produced_data else {}
+        for check in check_smoke(report, profile, pid, reuse=reuse, **trial_kwargs):
             report.add(check)
 
     if overhead_window_s > 0:
@@ -599,7 +628,8 @@ def run_preflight(
 def render(report: PreflightReport) -> str:
     mark = {PASS: "[ok]", WARN: "[!]", FAIL: "[X]", SKIP: "[-]"}
     lines = ["preflight"]
-    shown_errors = set()
+    #: cause -> the check it was first printed under
+    shown_errors: Dict[str, str] = {}
     missing_tools = any(
         check.status == FAIL and check.name in ("bpftrace", "probe_programs")
         for check in report.checks
@@ -619,7 +649,11 @@ def render(report: PreflightReport) -> str:
             cause = trial_error(check)
             if cause and cause not in shown_errors:
                 lines.append(f"       cause: {cause}")
-                shown_errors.add(cause)
+                shown_errors[cause] = check.name
+            elif cause:
+                # Printed once, but still named: without this line only the
+                # first probe looks like it hit the error.
+                lines.append(f"       cause: same as {shown_errors[cause]}")
     if missing_tools:
         lines.append("  [-] probe trials           not run: required tools are unavailable")
     return "\n".join(lines)

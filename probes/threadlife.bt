@@ -14,25 +14,20 @@ tracepoint:sched:sched_process_fork
 / args->parent_pid == $1 /
 {
     @fork_cnt[args->parent_comm] = count();
-    @born_at[args->child_pid] = nsecs;
+    @_born_at[args->child_pid] = nsecs;
 }
 
 tracepoint:sched:sched_process_exit
 / pid == $1 /
 {
     @exit_cnt[comm] = count();
-    if (@born_at[tid]) {
-        @thread_lifetime_ms = hist((nsecs - @born_at[tid]) / 1000000);
-        delete(@born_at[tid]);
+    if (@_born_at[tid]) {
+        @thread_lifetime_ms = hist((nsecs - @_born_at[tid]) / 1000000);
+        delete(@_born_at[tid]);
     }
 }
 
 interval:s:$2
 {
     exit();
-}
-
-END
-{
-    clear(@born_at);
 }

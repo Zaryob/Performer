@@ -24,36 +24,29 @@
 tracepoint:syscalls:sys_enter_futex
 / pid == $1 /
 {
-    @fx_start[tid] = nsecs;
-    @fx_addr[tid] = (uint64) args->uaddr;
-    @fx_op[tid] = args->op;
+    @_fx_start[tid] = nsecs;
+    @_fx_addr[tid] = (uint64) args->uaddr;
+    @_fx_op[tid] = args->op;
 }
 
 tracepoint:syscalls:sys_exit_futex
-/ @fx_start[tid] /
+/ @_fx_start[tid] /
 {
-    $waited_us = (nsecs - @fx_start[tid]) / 1000;
+    $waited_us = (nsecs - @_fx_start[tid]) / 1000;
     if ($waited_us >= $3) {
         @futex_us[ustack]                 = sum($waited_us);
-        @futex_by_addr[@fx_addr[tid]]     = sum($waited_us);
-        @futex_cnt_by_addr[@fx_addr[tid]] = count();
-        @futex_site[@fx_addr[tid], ustack]     = sum($waited_us);
-        @futex_site_cnt[@fx_addr[tid], ustack] = count();
+        @futex_by_addr[@_fx_addr[tid]]     = sum($waited_us);
+        @futex_cnt_by_addr[@_fx_addr[tid]] = count();
+        @futex_site[@_fx_addr[tid], ustack]     = sum($waited_us);
+        @futex_site_cnt[@_fx_addr[tid], ustack] = count();
         @futex_hist                       = hist($waited_us);
     }
-    delete(@fx_start[tid]);
-    delete(@fx_addr[tid]);
-    delete(@fx_op[tid]);
+    delete(@_fx_start[tid]);
+    delete(@_fx_addr[tid]);
+    delete(@_fx_op[tid]);
 }
 
 interval:s:$2
 {
     exit();
-}
-
-END
-{
-    clear(@fx_start);
-    clear(@fx_addr);
-    clear(@fx_op);
 }

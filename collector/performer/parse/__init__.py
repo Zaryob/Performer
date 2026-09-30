@@ -13,6 +13,28 @@ guess.
 
 from __future__ import annotations
 
+#: Maps whose name starts with this are per-thread bookkeeping, not results.
+#: Probes cannot clear them in ``END`` (a stripped bpftrace cannot attach
+#: ``END`` at all), so bpftrace prints them on exit and they are dropped here.
+SCRATCH_PREFIX = "@_"
+
+
+def strip_scratch_maps(text: str) -> str:
+    """Remove scratch maps from bpftrace output before it is parsed.
+
+    A scratch map runs from its first ``@_`` line to the next line that starts
+    a real map.  Its entries can have multi-line values (``@_off_ustack``
+    holds whole stacks), so dropping single lines would not be enough.
+    """
+    kept = []
+    skipping = False
+    for line in text.splitlines(keepends=True):
+        if line.startswith("@"):
+            skipping = line.startswith(SCRATCH_PREFIX)
+        if not skipping:
+            kept.append(line)
+    return "".join(kept)
+
 
 def count_map_entries(text: str) -> int:
     """How many map entries a probe printed, across every output shape.

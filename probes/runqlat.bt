@@ -17,30 +17,25 @@
 tracepoint:sched:sched_wakeup,
 tracepoint:sched:sched_wakeup_new
 {
-    @queued_at[args->pid] = nsecs;
+    @_queued_at[args->pid] = nsecs;
 }
 
 tracepoint:sched:sched_switch
 {
-    if (@queued_at[args->next_pid]) {
-        $wait_us = (nsecs - @queued_at[args->next_pid]) / 1000;
+    if (@_queued_at[args->next_pid]) {
+        $wait_us = (nsecs - @_queued_at[args->next_pid]) / 1000;
         @runq_us = hist($wait_us);
         @runq_by_thread[args->next_comm] = stats($wait_us);
-        delete(@queued_at[args->next_pid]);
+        delete(@_queued_at[args->next_pid]);
     }
 
     // A thread preempted while still runnable goes straight back on the queue.
     if (args->prev_state == 0) {
-        @queued_at[args->prev_pid] = nsecs;
+        @_queued_at[args->prev_pid] = nsecs;
     }
 }
 
 interval:s:$2
 {
     exit();
-}
-
-END
-{
-    clear(@queued_at);
 }

@@ -27,6 +27,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
+from . import strip_scratch_maps
+
 UNKNOWN = "[unknown]"
 
 #: A trailing ``+123`` or ``+0x7b`` symbol offset.  Anchored at the end so
@@ -112,7 +114,7 @@ def parse_maps(text: str) -> ParseResult:
     profile is worth keeping, and the manifest has somewhere to say so.
     """
     result = ParseResult()
-    lines = text.splitlines()
+    lines = strip_scratch_maps(text).splitlines()
     index = 0
     total = len(lines)
 
