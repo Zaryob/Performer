@@ -4,6 +4,8 @@
 adds hardware counts to the usual eBPF run. PMU is independent of the
 `light`, `standard`, and `deep` probe profiles and is off by default. The
 browser's New measurement form offers the same choice.
+If the eBPF smoke tests all fail but PMU preflight succeeds, the run can still
+collect PMU counters and records the failed probes in the bundle.
 
 The first PMU mode counts user-space `cycles`, `instructions`, `branches`,
 `branch_misses`, `cache_references`, and `cache_misses`. It attaches to every

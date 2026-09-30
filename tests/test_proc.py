@@ -202,6 +202,14 @@ class RealTargetTests(unittest.TestCase):
         self.assertEqual(merged["3"]["first_seen"], "end")
         self.assertNotIn("exited", merged["2"])
 
+    def test_snapshot_merge_does_not_subtract_recycled_tid(self):
+        start = {7: {"name": "old", "start_time_ticks": 100, "schedstat": {"run_ns": 900}}}
+        end = {7: {"name": "new", "start_time_ticks": 200, "schedstat": {"run_ns": 40}}}
+        entry = proc.merge_thread_snapshots(start, end)["7"]
+        self.assertEqual(entry["start_time_ticks"], 200)
+        self.assertEqual(entry["first_seen"], "end")
+        self.assertNotIn("start_schedstat", entry)
+
     def test_target_info_carries_what_probes_need(self):
         info = proc.target_info(self.target.pid)
         self.assertEqual(info["pid"], self.target.pid)

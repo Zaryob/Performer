@@ -103,7 +103,7 @@ export function Threads({
       const end = entry.end_schedstat;
       const candidates = pmuThreads.get(Number(tid)) ?? [];
       const onlyCandidate = candidates.length === 1 ? candidates[0] : undefined;
-      const pmu = onlyCandidate?.name === entry.name ? onlyCandidate : null;
+      const pmu = onlyCandidate?.start_time_ticks === entry.start_time_ticks ? onlyCandidate : null;
       if (pmu) matched.add(`${pmu.tid}:${pmu.start_time_ticks}`);
       return {
         key: tid,

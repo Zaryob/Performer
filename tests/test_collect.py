@@ -11,6 +11,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from performer import layout
 from performer.bundle import Bundle
@@ -239,6 +240,30 @@ class DegradedCollectTests(unittest.TestCase):
                 collect(self._options(target.pid), printer=quiet)
         self.assertIn("no probe survived", str(ctx.exception))
         self.assertIn("Invalid provider", str(ctx.exception))
+
+    def test_pmu_run_survives_when_all_bpf_smoke_tests_fail(self):
+        with spawn_target(threads=2, seconds=60) as target, fake_bpftrace("startup_error"), \
+             patch("performer.collect.pmu_mod.Session") as session_type:
+            session = session_type.return_value
+            session.groups = [("cycles", "instructions")]
+            session.threads = {target.pid: object()}
+            session.warnings = []
+            event = {"raw": 100, "scaled": 100.0, "time_enabled_ns": 1000, "time_running_ns": 1000}
+            session.document.return_value = {
+                "schema_version": 1, "kind": "pmu", "mode": "basic", "source": "perf_event_open",
+                "scope": "user", "status": "ok", "cpu_model": "test CPU", "arch": "aarch64",
+                "window_s": 1.0, "thread_count_start": 1, "threads_measured": 1,
+                "events": ["cycles", "instructions"],
+                "totals": {"cycles": event, "instructions": event},
+                "threads": [{"tid": target.pid, "name": "target", "start_time_ticks": 1,
+                             "coverage_s": 1.0, "events": {"cycles": event, "instructions": event}}],
+                "warnings": [],
+            }
+            result = collect(self._options(target.pid, pmu="basic"), printer=quiet)
+        self.assertEqual(result.manifest["status"], "partial")
+        with Bundle.open(result.archive) as bundle:
+            self.assertTrue(bundle.validate().ok)
+            self.assertTrue(bundle.exists(layout.PMU_COUNTERS))
 
     def test_failed_oncpu_is_warning_when_other_probes_work(self):
         with spawn_target(threads=8, seconds=60) as target, fake_bpftrace("oncpu_startup_error"):

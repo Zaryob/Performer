@@ -286,6 +286,9 @@ def snapshot_threads(pid: int) -> Dict[int, Dict[str, Any]]:
         schedstat = read_schedstat(pid, tid)
         voluntary, nonvoluntary = read_ctxt_switches(pid, tid)
         entry: Dict[str, Any] = {"name": name}
+        stat = read_stat(pid, tid)
+        if stat is not None:
+            entry["start_time_ticks"] = stat.start_time_ticks
         if schedstat is not None:
             stats = schedstat.to_dict()
             if voluntary is not None:
@@ -312,14 +315,19 @@ def merge_thread_snapshots(
     for tid in sorted(set(start) | set(end)):
         in_start = tid in start
         in_end = tid in end
+        start_id = start.get(tid, {}).get("start_time_ticks")
+        end_id = end.get(tid, {}).get("start_time_ticks")
+        recycled = start_id is not None and end_id is not None and start_id != end_id
         source = start.get(tid) or end.get(tid) or {}
         entry: Dict[str, Any] = {
             "name": (end.get(tid) or source).get("name", ""),
-            "first_seen": "start" if in_start else "end",
+            "first_seen": "start" if in_start and not recycled else "end",
         }
+        if end_id is not None or start_id is not None:
+            entry["start_time_ticks"] = end_id if end_id is not None else start_id
         if in_start and not in_end:
             entry["exited"] = True
-        if in_start:
+        if in_start and not recycled:
             entry["start_schedstat"] = start[tid].get("schedstat")
         if in_end:
             entry["end_schedstat"] = end[tid].get("schedstat")

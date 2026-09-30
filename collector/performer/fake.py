@@ -351,6 +351,7 @@ def _threads(
         wait_ns = rng.randint(1_000_000, 60_000_000)
         entry: Dict[str, Any] = {
             "name": name,
+            "start_time_ticks": thread_id,
             "first_seen": "end" if born_late else "start",
         }
         if not born_late:

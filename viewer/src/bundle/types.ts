@@ -153,6 +153,7 @@ export interface Schedstat {
 
 export interface ThreadEntry {
   name: string;
+  start_time_ticks?: number;
   first_seen?: "start" | "end";
   exited?: boolean;
   start_schedstat?: Schedstat | null;
