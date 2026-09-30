@@ -195,6 +195,45 @@ class DeadTargetTests(unittest.TestCase):
         self.assertIn("[X] b", text)
         self.assertIn("-> fix it", text)
 
+    def test_a_repeated_cause_is_named_under_every_probe(self):
+        """Printed once, the cause made only the first probe look broken."""
+        stderr = "ERROR: Could not resolve symbol: /proc/self/exe:END_trigger\n"
+        report = preflight.PreflightReport()
+        for name in ("smoke:runqlat", "smoke:futex"):
+            report.add(
+                preflight.Check(
+                    name, preflight.WARN, "no data", details={"stderr": stderr}
+                )
+            )
+        text = preflight.render(report)
+        self.assertEqual(text.count("END_trigger"), 1)
+        self.assertIn("cause: same as smoke:runqlat", text)
+
+
+class SmokeReuseTests(unittest.TestCase):
+    def test_a_trial_that_already_ran_the_probe_is_reused(self):
+        """The frame pointer trial is an oncpu run; a second one can miss an idle target."""
+        trial = preflight.TrialResult(
+            ran=True, stdout="", stderr="", exit_reason="sigint", map_entries=4
+        )
+        report = preflight.PreflightReport()
+        with mock.patch.object(preflight, "run_trial") as run:
+            checks = preflight.check_smoke(report, PROFILE, 1, reuse={"oncpu": trial})
+        run.assert_not_called()
+        self.assertTrue(report.smoke["oncpu"])
+        self.assertEqual([c.status for c in checks], [preflight.PASS])
+
+    def test_probes_without_a_reusable_trial_still_run(self):
+        silent = preflight.TrialResult(
+            ran=True, stdout="", stderr="", exit_reason="sigint"
+        )
+        report = preflight.PreflightReport()
+        with mock.patch.object(preflight, "run_trial", return_value=silent) as run:
+            checks = preflight.check_smoke(report, PROFILE, 1, reuse={})
+        run.assert_called_once()
+        self.assertFalse(report.smoke["oncpu"])
+        self.assertEqual([c.status for c in checks], [preflight.WARN])
+
 
 class BpftraceEnvTests(unittest.TestCase):
     def test_map_limits_are_raised_under_both_spellings(self):

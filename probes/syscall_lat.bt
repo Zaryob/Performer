@@ -17,27 +17,21 @@
 tracepoint:raw_syscalls:sys_enter
 / pid == $1 /
 {
-    @sc_start[tid] = nsecs;
-    @sc_id[tid] = args->id;
+    @_sc_start[tid] = nsecs;
+    @_sc_id[tid] = args->id;
 }
 
 tracepoint:raw_syscalls:sys_exit
-/ @sc_start[tid] /
+/ @_sc_start[tid] /
 {
-    $elapsed_us = (nsecs - @sc_start[tid]) / 1000;
-    @sc_total_us[@sc_id[tid]] = sum($elapsed_us);
-    @sc_count[@sc_id[tid]]    = count();
-    delete(@sc_start[tid]);
-    delete(@sc_id[tid]);
+    $elapsed_us = (nsecs - @_sc_start[tid]) / 1000;
+    @sc_total_us[@_sc_id[tid]] = sum($elapsed_us);
+    @sc_count[@_sc_id[tid]]    = count();
+    delete(@_sc_start[tid]);
+    delete(@_sc_id[tid]);
 }
 
 interval:s:$2
 {
     exit();
-}
-
-END
-{
-    clear(@sc_start);
-    clear(@sc_id);
 }

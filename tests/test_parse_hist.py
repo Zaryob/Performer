@@ -121,6 +121,30 @@ class CoexistenceTests(unittest.TestCase):
         # Bucket lines must not be mistaken for the probe's preamble.
         self.assertEqual(result.preamble, [])
 
+    def test_scratch_maps_are_dropped_by_both_parsers(self):
+        """Probes cannot clear bookkeeping maps in END, so bpftrace prints them."""
+        from performer.parse import count_map_entries, stacks
+
+        text = (
+            "Attaching 3 probes...\n\n"
+            "@_off_kstack[4243]: \n        __schedule+723\n        schedule+70\n\n"
+            "@_off_start[4243]: 91838741177\n"
+            "@offcpu_by_state[1]: 900\n"
+            "@_queued_at[4242]: 91838740021\n"
+        )
+        dump = hist.parse_maps(text)
+        result = stacks.parse_maps(text)
+        self.assertEqual(dump.warnings, [])
+        self.assertEqual(result.warnings, [])
+        self.assertEqual(dump.values, {"offcpu_by_state": [("1", 900)]})
+        self.assertEqual(result.preamble, ["Attaching 3 probes..."])
+        self.assertEqual(count_map_entries(text), 2)  # offcpu_by_state, once per parser
+
+    def test_scratch_maps_alone_are_not_data(self):
+        from performer.parse import count_map_entries
+
+        self.assertEqual(count_map_entries("@_born_at[12]: 881\n@_born_at[13]: 882\n"), 0)
+
     def test_every_probe_output_parses_cleanly(self):
         """The fixtures are what the emitters are fed in production."""
         from .fake_bpftrace import OUTPUT_BY_PROBE

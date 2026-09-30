@@ -53,6 +53,23 @@ class ShippedProfileTests(unittest.TestCase):
                 with self.subTest(profile=profile.name, probe=spec.name):
                     self.assertIn(spec.name, EMITTERS)
 
+    def test_no_probe_uses_begin_or_end(self):
+        """A stripped bpftrace (Ubuntu 22.04's 0.14.0) cannot attach them.
+
+        It fails on SIGINT with "Could not resolve symbol:
+        /proc/self/exe:END_trigger" and exits without printing any map.
+        """
+        import re
+
+        for profile in profiles.load_all():
+            for spec in profile.probes:
+                with self.subTest(profile=profile.name, probe=spec.name):
+                    source = profiles.program_path(spec).read_text(encoding="utf-8")
+                    self.assertIsNone(
+                        re.search(r"^\s*(BEGIN|END)\b", source, re.M),
+                        f"{spec.program} has a BEGIN or END block",
+                    )
+
     def test_oncpu_is_required_everywhere(self):
         for profile in profiles.load_all():
             self.assertTrue(profile.probe("oncpu").required, profile.name)

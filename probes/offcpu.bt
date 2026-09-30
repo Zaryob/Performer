@@ -23,42 +23,32 @@ tracepoint:sched:sched_switch
 {
     // prev is leaving the CPU: remember when, and how it got here.
     if (args->prev_pid != 0 && pid == $1) {
-        @off_start[args->prev_pid] = nsecs;
-        @off_ustack[args->prev_pid] = ustack;
-        @off_kstack[args->prev_pid] = kstack;
-        @off_state[args->prev_pid] = args->prev_state;
+        @_off_start[args->prev_pid] = nsecs;
+        @_off_ustack[args->prev_pid] = ustack;
+        @_off_kstack[args->prev_pid] = kstack;
+        @_off_state[args->prev_pid] = args->prev_state;
     }
 
     // next is coming back: close the interval opened above. This runs
     // unconditionally because the switch that wakes a target thread is
     // usually accounted to some other process.
-    if (@off_start[args->next_pid]) {
-        $blocked_us = (nsecs - @off_start[args->next_pid]) / 1000;
+    if (@_off_start[args->next_pid]) {
+        $blocked_us = (nsecs - @_off_start[args->next_pid]) / 1000;
         if ($blocked_us >= $3) {
-            @offcpu_us[@off_kstack[args->next_pid],
-                       @off_ustack[args->next_pid],
+            @offcpu_us[@_off_kstack[args->next_pid],
+                       @_off_ustack[args->next_pid],
                        args->next_comm] = sum($blocked_us);
             @offcpu_hist = hist($blocked_us);
-            @offcpu_by_state[@off_state[args->next_pid]] = sum($blocked_us);
+            @offcpu_by_state[@_off_state[args->next_pid]] = sum($blocked_us);
         }
-        delete(@off_start[args->next_pid]);
-        delete(@off_ustack[args->next_pid]);
-        delete(@off_kstack[args->next_pid]);
-        delete(@off_state[args->next_pid]);
+        delete(@_off_start[args->next_pid]);
+        delete(@_off_ustack[args->next_pid]);
+        delete(@_off_kstack[args->next_pid]);
+        delete(@_off_state[args->next_pid]);
     }
 }
 
 interval:s:$2
 {
     exit();
-}
-
-END
-{
-    // Scratch maps would otherwise be printed alongside the results and
-    // parsed as data.
-    clear(@off_start);
-    clear(@off_ustack);
-    clear(@off_kstack);
-    clear(@off_state);
 }
