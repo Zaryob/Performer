@@ -141,9 +141,10 @@ $ performer preflight --pid 205852                               # just the chec
 
 ### Ubuntu packages
 
-GitHub Actions and GitLab CI build separate `performer-collector` `.deb`
-artifacts on Ubuntu 22.04 and 24.04. Each job runs the collector tests, installs
-its package, and validates a synthetic bundle through the installed command.
+GitHub Actions and GitLab CI run the collector tests on every branch except
+`main`. After a merge to `main`, they build separate `performer-collector` `.deb`
+artifacts on Ubuntu 22.04 and 24.04; each package job installs its package and
+validates a synthetic bundle through the installed command.
 Download the artifact for the target release and install it with
 `sudo apt install ./performer-collector_*.deb`. The package contains the
 collector, profiles, probes, and schemas; it installs `performer` on `PATH`.

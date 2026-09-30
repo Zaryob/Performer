@@ -1,0 +1,27 @@
+name: Tests
+
+# Branches only: main is reached through a pull request whose branch has
+# already been tested, so running the suite again after the merge adds
+# nothing but queue time.
+on:
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Ubuntu ${{ matrix.ubuntu }}
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-${{ matrix.ubuntu }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ['22.04', '24.04']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bpftrace g++ make python3
+      - name: Test collector
+        run: sudo make check

@@ -1,13 +1,16 @@
 name: Collector Debian packages
 
+# Packages are built from main only, after a pull request has been merged.
+# The tests run on the branch before that (tests.yml).
 on:
   push:
-  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
   package:
     name: Ubuntu ${{ matrix.ubuntu }}
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-${{ matrix.ubuntu }}
     strategy:
       fail-fast: false
@@ -15,12 +18,10 @@ jobs:
         ubuntu: ['22.04', '24.04']
     steps:
       - uses: actions/checkout@v4
-      - name: Install test and package dependencies
+      - name: Install package dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bpftrace g++ make python3
-      - name: Test collector
-        run: sudo make check
+          sudo apt-get install -y bpftrace python3
       - name: Build Debian package
         run: bash packaging/build-deb.sh '${{ matrix.ubuntu }}'
       - name: Install and smoke test package

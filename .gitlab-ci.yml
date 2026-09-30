@@ -1,12 +1,26 @@
 stages:
+  - test
   - package
 
-.collector-deb:
-  stage: package
+# Same rules as GitHub Actions: tests on branches, packages from the default
+# branch only, after a merge.
+
+.collector-test:
+  stage: test
+  rules:
+    - if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
   script:
     - apt-get update
     - apt-get install -y bpftrace g++ make python3
     - make check
+
+.collector-deb:
+  stage: package
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - apt-get update
+    - apt-get install -y bpftrace python3
     - bash packaging/build-deb.sh "$UBUNTU_VERSION"
     - bash packaging/smoke-deb.sh dist/*.deb
   artifacts:
@@ -14,6 +28,14 @@ stages:
     paths:
       - dist/*.deb
     expire_in: 14 days
+
+test-ubuntu-22.04:
+  extends: .collector-test
+  image: ubuntu:22.04
+
+test-ubuntu-24.04:
+  extends: .collector-test
+  image: ubuntu:24.04
 
 ubuntu-22.04:
   extends: .collector-deb
