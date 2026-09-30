@@ -580,8 +580,16 @@ def bpftrace_env() -> Dict[str, str]:
     above the defaults: 315 threads x several stacks each overflows the stock
     4096 easily.  Both spellings of the map limit are set because bpftrace
     renamed it; the unknown one is ignored harmlessly.
+
+    User symbols are cached because bpftrace, with ASLR on, otherwise
+    re-reads the target's symbol tables for every ``ustack`` it prints.
+    With thousands of off-CPU or futex stacks on a large C++ binary, the map
+    dump then outlasts the SIGINT timeout, the probe is SIGKILLed, and every
+    stack map is lost.  Caching is safe here: each probe traces one
+    long-running process whose address space does not move.
     """
     return {
+        "BPFTRACE_CACHE_USER_SYMBOLS": "1",
         "BPFTRACE_MAX_MAP_KEYS": "1048576",
         "BPFTRACE_MAP_KEYS_MAX": "1048576",
         "BPFTRACE_MAX_PROBES": "1024",

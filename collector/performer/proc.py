@@ -404,10 +404,21 @@ def overhead_pct(baseline_pct: Optional[float], during_pct: Optional[float]) -> 
     Expressed relative to the baseline, so it reads as "the workload became N%
     more expensive". Negative results clamp to zero: tracing cannot make the
     target cheaper, so a negative number is baseline noise.
+
+    The baseline is floored at :data:`OVERHEAD_BASELINE_FLOOR_PCT`.  A mostly
+    idle target at 0.7% of a CPU that reads 1.0% while traced is not "43%
+    more expensive" -- a third of a percent of one CPU is noise in a
+    ``/proc`` tick count, and dividing by a near-zero baseline turns it into
+    a red error.
     """
     if not baseline_pct or during_pct is None or baseline_pct <= 0:
         return 0.0
-    return max(0.0, round(100.0 * (during_pct - baseline_pct) / baseline_pct, 2))
+    base = max(baseline_pct, OVERHEAD_BASELINE_FLOOR_PCT)
+    return max(0.0, round(100.0 * (during_pct - baseline_pct) / base, 2))
+
+
+#: Smallest baseline, in percent of one CPU, that overhead is measured against.
+OVERHEAD_BASELINE_FLOOR_PCT = 10.0
 
 
 def cpu_pct_between(

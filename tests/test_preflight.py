@@ -283,6 +283,10 @@ class BpftraceEnvTests(unittest.TestCase):
         self.assertEqual(env["BPFTRACE_MAX_MAP_KEYS"], env["BPFTRACE_MAP_KEYS_MAX"])
         self.assertGreater(int(env["BPFTRACE_MAX_MAP_KEYS"]), 4096)
 
+    def test_user_symbols_are_cached(self):
+        """Uncached, a large ustack dump outlasts the SIGINT timeout."""
+        self.assertEqual(preflight.bpftrace_env()["BPFTRACE_CACHE_USER_SYMBOLS"], "1")
+
 
 if __name__ == "__main__":
     unittest.main()

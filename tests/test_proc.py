@@ -84,6 +84,12 @@ class CpuTests(unittest.TestCase):
         self.assertEqual(proc.overhead_pct(100.0, 110.0), 10.0)
         self.assertEqual(proc.overhead_pct(200.0, 260.0), 30.0)
 
+    def test_an_idle_baseline_does_not_inflate_overhead(self):
+        """0.7% -> 1.0% of a CPU is tick noise, not a 43% slowdown."""
+        self.assertLess(proc.overhead_pct(0.7, 1.0), 5.0)
+        # A genuine cost on an idle target still shows.
+        self.assertEqual(proc.overhead_pct(1.0, 6.0), 50.0)
+
     def test_overhead_never_goes_negative(self):
         # Tracing cannot make the target cheaper; a negative delta is noise.
         self.assertEqual(proc.overhead_pct(100.0, 90.0), 0.0)
