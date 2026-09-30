@@ -32,7 +32,7 @@ Overview, Threads ve Diff ekranlarında görünür; [sınırlar ve kalite bilgis
 
 Başlangıç kontrolü eksik araç veya prob dosyası bulursa ölçüm başlamaz.
 Çalışabilen problar varsa diğerlerinin hatası uyarı olarak kaydedilir.
-Testler CI'da yalnızca branch'lerde çalışır. Ubuntu 22.04/24.04 için
+Collector ve görüntüleyici testleri CI'da yalnızca branch'lerde çalışır. Ubuntu 22.04/24.04 için
 `performer-collector` `.deb` dosyaları yalnızca `main`'e merge sonrası GitHub ve
 GitLab CI çıktılarında üretilir; kurulunca komut `performer` olarak kullanılabilir.
 

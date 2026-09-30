@@ -35,3 +35,8 @@ The first implementation supports Linux x86_64 and aarch64. A container or
 virtual machine that does not expose hardware counters cannot validate a live
 PMU run; `fake-run --pmu basic` creates synthetic data for testing the bundle
 and viewer, clearly marked as synthetic.
+
+On a real Ubuntu host, run `sudo python3 tests/pmu_live_smoke.py` to check
+actual per-thread counts. It starts a CPU worker after the counters begin,
+then verifies that the worker's cycles and instructions are present. CI tries
+the same check but reports a restricted virtual PMU as skipped.

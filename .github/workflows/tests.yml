@@ -25,3 +25,25 @@ jobs:
           sudo apt-get install -y bpftrace g++ make python3
       - name: Test collector
         run: sudo make check
+      - name: Try live PMU counters
+        run: sudo python3 tests/pmu_live_smoke.py --optional
+
+  viewer:
+    name: Offline viewer
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: viewer/package-lock.json
+      - name: Install viewer dependencies
+        working-directory: viewer
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck, test, and build viewer
+        working-directory: viewer
+        run: npm run typecheck && npm test && npm run build
+      - name: Confirm committed offline viewer is current
+        run: git diff --exit-code -- viewer/dist/index.html

@@ -49,6 +49,8 @@ def make_run_id(label: str, started_at: _dt.datetime) -> str:
         raise ManifestError(
             f"invalid label {label!r}: use letters, digits, dot, dash or underscore"
         )
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=_dt.timezone.utc)
     stamp = started_at.astimezone(_dt.timezone.utc).strftime(RUN_ID_TS_FORMAT)
     return f"{stamp}-{label}"
 

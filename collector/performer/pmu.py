@@ -71,6 +71,7 @@ class ThreadCounters:
     start_time_ticks: int
     name: str
     groups: Dict[Tuple[str, str], List[int]] = field(default_factory=dict)
+    samples: Dict[Tuple[str, str], Tuple[int, int, int, int]] = field(default_factory=dict)
     enabled_at: Optional[float] = None
     finished_at: Optional[float] = None
 
@@ -88,6 +89,7 @@ class Session:
         self.pid = pid
         self.groups: List[Tuple[str, str]] = []
         self.threads: Dict[Tuple[int, int], ThreadCounters] = {}
+        self._active: Set[Tuple[int, int]] = set()
         self.warnings: List[str] = []
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -146,8 +148,9 @@ class Session:
                 os.close(fd)
             raise
 
-    def _attach(self, tid: int) -> None:
-        stat = proc.read_stat(self.pid, tid)
+    def _attach(self, tid: int, stat: Optional[proc.Stat] = None) -> None:
+        if stat is None:
+            stat = proc.read_stat(self.pid, tid)
         if stat is None:
             return
         key = (tid, stat.start_time_ticks)
@@ -168,6 +171,7 @@ class Session:
                     self.warnings.append(f"tid {tid}: PMU attachment failed: {error}")
             return
         self.threads[key] = record
+        self._active.add(key)
 
     @staticmethod
     def _enable(record: ThreadCounters) -> None:
@@ -189,16 +193,46 @@ class Session:
             with self._lock:
                 live = set(proc.thread_ids(self.pid))
                 now = time.monotonic()
-                identities = set()
+                stats = {}
                 for tid in live:
                     stat = proc.read_stat(self.pid, tid)
                     if stat is not None:
-                        identities.add((tid, stat.start_time_ticks))
-                for record in self.threads.values():
-                    if (record.tid, record.start_time_ticks) not in identities and record.finished_at is None:
+                        stats[tid] = stat
+                for key in tuple(self._active):
+                    record = self.threads[key]
+                    current = stats.get(record.tid)
+                    departed = record.tid not in live or (
+                        current is not None and current.start_time_ticks != record.start_time_ticks
+                    )
+                    if departed and record.finished_at is None:
                         record.finished_at = now
-                for tid in live:
-                    self._attach(tid)
+                        self._capture(record, disable=False)
+                for tid, stat in stats.items():
+                    self._attach(tid, stat)
+
+    @staticmethod
+    def _read_group(fds: List[int]) -> Tuple[int, int, int, int]:
+        data = os.read(fds[0], 40)
+        if len(data) != 40:
+            raise OSError("short PMU group read")
+        nr, enabled, running, first, second = struct.unpack("=QQQQQ", data)
+        if nr != 2:
+            raise OSError(f"unexpected PMU group size {nr}")
+        return enabled, running, first, second
+
+    def _capture(self, record: ThreadCounters, *, disable: bool) -> None:
+        for group, fds in record.groups.items():
+            if disable:
+                try:
+                    fcntl.ioctl(fds[0], IOC_DISABLE, IOC_GROUP)
+                except OSError as error:
+                    self.warnings.append(f"tid {record.tid}: PMU stop failed: {error}")
+            try:
+                record.samples[group] = self._read_group(fds)
+            except OSError as error:
+                self.warnings.append(f"tid {record.tid}: PMU read failed: {error}")
+        record.close()
+        self._active.discard((record.tid, record.start_time_ticks))
 
     def stop(self) -> None:
         self._stop.set()
@@ -206,12 +240,10 @@ class Session:
             self._watcher.join(timeout=2)
         with self._lock:
             self._ended_at = time.monotonic()
-            for record in self.threads.values():
-                for fds in record.groups.values():
-                    try:
-                        fcntl.ioctl(fds[0], IOC_DISABLE, IOC_GROUP)
-                    except OSError as error:
-                        self.warnings.append(f"tid {record.tid}: PMU stop failed: {error}")
+            for key in tuple(self._active):
+                record = self.threads[key]
+                record.finished_at = self._ended_at
+                self._capture(record, disable=True)
 
     def document(self) -> dict:
         if self._started_at is None or self._ended_at is None:
@@ -221,17 +253,13 @@ class Session:
         poor_scheduling = False
         for record in sorted(self.threads.values(), key=lambda item: (item.tid, item.start_time_ticks)):
             events: Dict[str, dict] = {}
+            groups = dict(record.samples)
             for group, fds in record.groups.items():
                 try:
-                    data = os.read(fds[0], 40)
-                    if len(data) != 40:
-                        raise OSError("short PMU group read")
-                    nr, enabled, running, first, second = struct.unpack("=QQQQQ", data)
-                    if nr != 2:
-                        raise OSError(f"unexpected PMU group size {nr}")
+                    groups[group] = self._read_group(fds)
                 except OSError as error:
                     self.warnings.append(f"tid {record.tid}: PMU read failed: {error}")
-                    continue
+            for group, (enabled, running, first, second) in groups.items():
                 if not running or not enabled or running < enabled * 0.9:
                     poor_scheduling = True
                 for name, raw in zip(group, (first, second)):

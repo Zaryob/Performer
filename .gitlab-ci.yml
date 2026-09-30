@@ -37,6 +37,20 @@ test-ubuntu-24.04:
   extends: .collector-test
   image: ubuntu:24.04
 
+test-viewer:
+  stage: test
+  image: node:24-bookworm
+  rules:
+    - if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+  script:
+    - cd viewer
+    - npm ci --no-audit --no-fund
+    - npm run typecheck
+    - npm test
+    - cp dist/index.html /tmp/performer-viewer-committed.html
+    - npm run build
+    - cmp dist/index.html /tmp/performer-viewer-committed.html
+
 ubuntu-22.04:
   extends: .collector-deb
   image: ubuntu:22.04

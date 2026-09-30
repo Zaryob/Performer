@@ -141,7 +141,7 @@ $ performer preflight --pid 205852                               # just the chec
 
 ### Ubuntu packages
 
-GitHub Actions and GitLab CI run the collector tests on every branch except
+GitHub Actions and GitLab CI run collector and viewer tests on every branch except
 `main`. After a merge to `main`, they build separate `performer-collector` `.deb`
 artifacts on Ubuntu 22.04 and 24.04; each package job installs its package and
 validates a synthetic bundle through the installed command.

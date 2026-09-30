@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import struct
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -69,3 +70,37 @@ class PmuDocumentTests(unittest.TestCase):
             session._attach(456)
         self.assertEqual(opener.call_count, 1)
         self.assertEqual(session._attach_failures, 1)
+
+    def test_thread_churn_releases_fds_and_preserves_counts(self):
+        session = pmu.Session(123)
+        session.groups = [pmu.EVENT_GROUPS[0]]
+        session._started_at = time.monotonic()
+        opened = []
+
+        def open_group(_tid, _group):
+            read_fd, write_fd = os.pipe()
+            os.write(write_fd, struct.pack("=QQQQQ", 2, 100, 100, 40, 20))
+            opened.extend((read_fd, write_fd))
+            return [read_fd, write_fd]
+
+        tids = list(range(500, 525))
+        scans = [[tid] for tid in tids] + [[]]
+        stats = {tid: SimpleNamespace(start_time_ticks=tid * 10, comm="worker") for tid in tids}
+        with patch.object(session._stop, "wait", side_effect=[False] * len(scans) + [True]), \
+             patch.object(pmu.proc, "thread_ids", side_effect=scans), \
+             patch.object(pmu.proc, "read_stat", side_effect=lambda _pid, tid: stats[tid]) as read_stat, \
+             patch.object(pmu.proc, "read_comm", return_value="worker"), \
+             patch.object(session, "_open_group", side_effect=open_group), \
+             patch.object(session, "_enable", side_effect=lambda record: setattr(record, "enabled_at", time.monotonic())):
+            session._watch_threads()
+
+        self.assertEqual(read_stat.call_count, len(tids))
+        self.assertEqual(len(session.threads), len(tids))
+        self.assertEqual(session._active, set())
+        for fd in opened:
+            with self.assertRaises(OSError):
+                os.fstat(fd)
+        session._ended_at = time.monotonic()
+        document = session.document()
+        self.assertEqual(document["threads_measured"], len(tids))
+        self.assertEqual(document["totals"]["cycles"]["raw"], 40 * len(tids))
