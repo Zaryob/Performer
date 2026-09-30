@@ -13,6 +13,7 @@ trap 'rm -rf "$tmp"' EXIT
 cd "$tmp"
 performer --help >/dev/null
 performer schema | grep -q 'manifest.schema.json'
-performer fake-run --out "$tmp/runs" --label package-smoke
+performer fake-run --pmu basic --out "$tmp/runs" --label package-smoke
 bundles=("$tmp"/runs/*.tgz)
 performer validate --verify-hashes "${bundles[0]}"
+performer inspect --json "${bundles[0]}" | python3 -c 'import json, sys; doc = json.load(sys.stdin); assert doc["pmu"]["mode"] == "basic"'

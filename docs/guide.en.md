@@ -154,6 +154,13 @@ To build locally on the matching Ubuntu release, run
 `bash packaging/build-deb.sh 22.04` or `bash packaging/build-deb.sh 24.04`.
 The result is written to `dist/`.
 
+### Hardware counters
+
+Add `--pmu basic` to `collect` to count user-space CPU cycles, instructions,
+branches, and generic cache events alongside the selected eBPF profile. PMU
+data appears in the offline viewer's Overview, Threads, and Diff screens.
+See [PMU counters](pmu.md) for coverage and quality rules.
+
 ## Quick start without a target
 
 No installation, no bpftrace, no root:

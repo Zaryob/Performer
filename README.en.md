@@ -26,6 +26,10 @@ sudo ./collector/bin/performer collect --pid PID --duration 30 --profile standar
 
 `PID` must be the program's own pid: if it was started as `sudo ./app`, use
 the child's pid, not sudo's (`pgrep -f app` or `pstree -p`).
+
+Add `--pmu basic` for hardware counters. The viewer shows them in Overview,
+Threads, and Diff; see [scope and quality notes](docs/pmu.md).
+
 Preflight stops before collection when a required tool or probe file is missing.
 If some probes work, failures in the others are recorded as warnings.
 GitHub and GitLab CI produce `performer-collector` `.deb` files for Ubuntu

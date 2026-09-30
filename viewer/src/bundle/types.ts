@@ -167,6 +167,39 @@ export interface ThreadsDoc {
   threads: Record<string, ThreadEntry>;
 }
 
+export interface PmuEvent {
+  raw: number;
+  scaled: number | null;
+  time_enabled_ns: number;
+  time_running_ns: number;
+}
+
+export interface PmuThread {
+  tid: number;
+  name: string;
+  start_time_ticks: number;
+  coverage_s: number;
+  events: Record<string, PmuEvent>;
+}
+
+export interface PmuDoc {
+  schema_version: number;
+  kind: "pmu";
+  mode: "basic";
+  source: string;
+  scope: "user";
+  status: "ok" | "partial" | "failed";
+  cpu_model?: string | null;
+  arch?: string;
+  window_s: number;
+  thread_count_start: number;
+  threads_measured: number;
+  events: string[];
+  totals: Record<string, PmuEvent>;
+  threads: PmuThread[];
+  warnings: string[];
+}
+
 export interface SystemDoc {
   schema_version: number;
   hostname?: string | null;
@@ -193,6 +226,7 @@ export const PATHS = {
   system: "meta/system.json",
   target: "meta/target.json",
   threads: "meta/threads.json",
+  pmu: "pmu/counters.json",
   oncpu: "stacks/oncpu.folded",
   offcpu: "stacks/offcpu.folded",
   futex: "stacks/futex.folded",

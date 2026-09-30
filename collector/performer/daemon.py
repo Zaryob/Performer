@@ -86,6 +86,7 @@ class Job:
     profile: str
     label: str
     duration_s: float
+    pmu: str = "off"
     state: str = "queued"  # queued | running | done | failed | cancelled
     started_at: Optional[float] = None
     ended_at: Optional[float] = None
@@ -102,6 +103,7 @@ class Job:
             "profile": self.profile,
             "label": self.label,
             "duration_s": self.duration_s,
+            "pmu": self.pmu,
             "state": self.state,
             "started_at": self.started_at,
             "ended_at": self.ended_at,
@@ -420,6 +422,9 @@ class Service:
             )
         label = validate_label(body.get("label"))
         duration = validate_duration(body.get("duration_s", 60))
+        pmu_mode = body.get("pmu", "off")
+        if pmu_mode not in ("off", "basic"):
+            raise Rejected(HTTPStatus.BAD_REQUEST, "pmu must be 'off' or 'basic'")
         tags = validate_tags(body.get("tags"))
         notes = validate_notes(body.get("notes"))
 
@@ -452,6 +457,7 @@ class Service:
                 profile=profile_name,
                 label=label,
                 duration_s=duration,
+                pmu=pmu_mode,
             )
             self._jobs[job.id] = job
             self._order.append(job.id)
@@ -509,6 +515,7 @@ class Service:
                 tags=tags,
                 notes=notes,
                 bpftrace=self.options.bpftrace,
+                pmu=job.pmu,
                 printer=printer,
                 cancel=self._cancel,
             )
@@ -568,6 +575,7 @@ def _real_collect(
     tags: List[str],
     notes: str,
     bpftrace: Optional[str],
+    pmu: str,
     printer: Callable[[str], None],
     cancel: threading.Event,
 ) -> Any:
@@ -584,6 +592,7 @@ def _real_collect(
             tags=tags,
             notes=notes,
             bpftrace=bpftrace,
+            pmu=pmu,
         ),
         printer=printer,
         cancel=cancel,
