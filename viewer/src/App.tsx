@@ -9,7 +9,10 @@ import { Locks } from "./screens/Locks";
 import { Wakeups } from "./screens/Wakeups";
 import { Collect } from "./screens/Collect";
 import { adoptToken, api, probe, setToken, type DaemonStatus } from "./api";
+import { MIN_SUPPORTED_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSION } from "./bundle/types";
 import { Empty } from "./components/ui";
+
+declare const __VIEWER_BUILD_REVISION__: string;
 
 const SCREENS = [
   "Runs",
@@ -162,8 +165,14 @@ export function App() {
               </button>
             )}
           </nav>
+          <span
+            className="ml-auto whitespace-nowrap rounded border border-slate-700 px-2 py-0.5 font-mono text-[11px] text-slate-400"
+            title="Viewer source fingerprint; use this to identify an older page or container"
+          >
+            bundles v{MIN_SUPPORTED_SCHEMA_VERSION}–v{SUPPORTED_SCHEMA_VERSION} · build {__VIEWER_BUILD_REVISION__}
+          </span>
           {selected && (
-            <span className="ml-auto text-xs text-slate-400">
+            <span className="text-xs text-slate-400">
               viewing <span className="text-slate-200">{selected.manifest.label}</span>{" "}
               · {selected.manifest.run_id}
               {baseline && (

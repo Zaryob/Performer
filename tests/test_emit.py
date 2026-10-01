@@ -50,6 +50,18 @@ class EmitterTestCase(unittest.TestCase):
 
 
 class OnCpuTests(EmitterTestCase):
+    def test_128_same_named_threads_are_not_collapsed_in_bundle(self):
+        text = "".join(
+            f"@cpu[\n    kernel+2\n,\n    work+4\n, worker, {tid}]: 1\n"
+            for tid in range(1000, 1128)
+        )
+        result = self.run_emitter("oncpu", text)
+        lines = (self.builder.root / layout.STACK_ONCPU).read_text().splitlines()
+        self.assertEqual(len(lines), 128)
+        self.assertIn("worker [tid=1000];work;kernel 1", lines)
+        self.assertIn("worker [tid=1127];work;kernel 1", lines)
+        self.assertEqual(result.fold_stats.total_samples, 128)
+
     def test_writes_folded_stacks(self):
         result = self.run_emitter("oncpu")
         self.assertEqual(result.outputs, [layout.STACK_ONCPU])
@@ -64,6 +76,18 @@ class OnCpuTests(EmitterTestCase):
 
 
 class OffCpuTests(EmitterTestCase):
+    def test_same_named_blocked_threads_are_separate_in_bundle(self):
+        text = "".join(
+            f"@offcpu_us[\n    schedule+2\n,\n    wait+4\n, worker, {tid}]: 10000\n"
+            for tid in (42, 43)
+        )
+        self.run_emitter("offcpu", text)
+        lines = (self.builder.root / layout.STACK_OFFCPU).read_text().splitlines()
+        self.assertEqual(lines, [
+            "worker [tid=42];wait;schedule 10000",
+            "worker [tid=43];wait;schedule 10000",
+        ])
+
     def test_writes_stacks_histogram_and_state_split(self):
         result = self.run_emitter("offcpu")
         self.assertIn(layout.STACK_OFFCPU, result.outputs)

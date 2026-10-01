@@ -9,7 +9,7 @@ browser and compares two runs.
 ## Viewer
 
 ```sh
-docker compose up -d --build
+docker compose up -d --build --force-recreate viewer
 ```
 
 Open [http://127.0.0.1:8080](http://127.0.0.1:8080) and select a run bundle.

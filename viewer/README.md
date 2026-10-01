@@ -13,13 +13,23 @@ Then open `dist/index.html` by double clicking it. That is the whole
 deployment: the analysis machine needs a browser and nothing else.
 
 To run the same self-contained page in Docker instead, from the repository
-root run `docker compose up -d --build` (or `make docker-viewer`). The root
+root run `docker compose up -d --build --force-recreate viewer` (or
+`make docker-viewer`). The root
 Compose file only serves the web viewer. It builds `performer-viewer:local` from source
 and serves it at `http://127.0.0.1:8080/` (override the host port with
 `PERFORMER_VIEWER_PORT`). `make docker-viewer-image` builds without starting a
 container; `make docker-viewer-down` stops it. The running image contains no
 Node.js or backend; bundles still enter through the browser's file picker or
 drag-and-drop.
+
+The page header shows its supported bundle versions and a 12-character build
+fingerprint. A version 2 bundle requires a page that says `bundles v1–v2`.
+If a browser says it only reads version 1, reopen a newly built
+`viewer/dist/index.html` (`npm run build` in `viewer/`), or recreate the Docker
+container with the command above and reload the page. Building an image alone
+does not replace an already running container. `performer daemon` serves
+`viewer/dist/index.html` from the checkout (or `PERFORMER_VIEWER_DIST` when
+set), so rebuild that file for daemon use too.
 
 ## Constraints that shaped it
 

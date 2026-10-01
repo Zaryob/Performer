@@ -196,6 +196,51 @@ class CleanFrameTests(unittest.TestCase):
 
 
 class FoldTests(unittest.TestCase):
+    def test_same_named_threads_with_identical_stacks_keep_their_tid(self):
+        entries = [
+            MapEntry((StackKey(["k"]), StackKey(["u"]), "worker", str(tid)), 3)
+            for tid in range(1000, 1128)
+        ]
+        folded, stats = fold_oncpu(entries)
+        self.assertEqual(len(folded), 128)
+        self.assertEqual({line for line, _ in folded}, {
+            f"worker [tid={tid}];u;k" for tid in range(1000, 1128)
+        })
+        self.assertEqual(stats.total_samples, 128 * 3)
+        # The identity label is not an extra sampled frame.
+        self.assertEqual(stats.total_frames, 128 * 3 * 2)
+
+    def test_same_tid_stacks_still_aggregate(self):
+        entries = [
+            MapEntry((StackKey(["k"]), StackKey(["u"]), "worker", "42"), value)
+            for value in (3, 4)
+        ]
+        folded, _stats = fold_oncpu(entries)
+        self.assertEqual(folded, [("worker [tid=42];u;k", 7)])
+
+    def test_empty_thread_name_still_preserves_tid(self):
+        entry = MapEntry((StackKey(["k"]), StackKey(["u"]), "", "42"), 3)
+        folded, stats = fold_oncpu([entry])
+        self.assertEqual(folded, [("[unnamed] [tid=42];u;k", 3)])
+        self.assertEqual(stats.total_frames, 6)
+
+    def test_four_key_text_preserves_cpp_symbols_and_thread_identity(self):
+        text = (
+            "@cpu[\n    kernel+2\n,\n"
+            "    std::map<int, int>::find()+4\n    main+2\n, worker, 42]: 5\n"
+        )
+        folded, stats, warnings = parse_oncpu(text)
+        self.assertEqual(warnings, [])
+        self.assertEqual(folded, [("worker [tid=42];main;std::map<int, int>::find();kernel", 5)])
+        self.assertEqual(stats.total_frames, 15)
+
+    def test_offcpu_four_key_map_uses_the_same_identity_format(self):
+        text = "@offcpu_us[\n    schedule+2\n,\n    wait+4\n, worker, 43]: 12345\n"
+        folded, stats, warnings = parse_oncpu(text, map_name="offcpu_us")
+        self.assertEqual(warnings, [])
+        self.assertEqual(folded, [("worker [tid=43];wait;schedule", 12345)])
+        self.assertEqual(stats.total_samples, 12345)
+
     def test_identical_stacks_are_summed(self):
         entries = [
             MapEntry((StackKey(["k"]), StackKey(["u"]), "w"), 3),
