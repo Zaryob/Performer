@@ -48,11 +48,11 @@ PAX headers by default, so those are understood too.
 
 **A 315 thread profile has to stay readable.** Two things follow. The graph is
 drawn on a canvas rather than as SVG — tens of thousands of DOM rects take
-seconds to lay out and stutter afterwards. And the thread frame is merged away
-by default: with 315 roots, a call path taken by every thread is drawn 315
-times and none of the slivers is wide enough to read. Merging answers "where
-does the time go"; the thread filter answers "which thread" once there is a
-reason to ask.
+seconds to lay out and stutter afterwards. On-CPU and off-CPU roots preserve
+TIDs, so same-named threads are separate. The graph shows these roots by
+default; merging is an explicit option for combining shared call paths.
+The inventory table lists every thread, including those without attributable
+stacks, and filtering by TID makes a small thread's graph readable.
 
 **Unusable data must not be drawn as if it were fine.** A run whose stacks
 could not be resolved gets a banner on the graph itself, not just a flag on

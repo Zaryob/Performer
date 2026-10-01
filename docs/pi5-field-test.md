@@ -96,9 +96,34 @@ Linux tam test takımı 414 testte geçti (1 atlama); son raporlama değişiklik
 29 hedefli Linux testiyle ayrıca doğrulandı. Son PMU düzeltmesi 9 testle hem
 Mac hem Linux üzerinde doğrulandı. Güncel viewer 103 testten geçti.
 
+## Aynı isimli 120 thread kontrolü
+
+`20261001T175652Z-same-name-120-tids` kaydı, kimlik düzeltmesini doğrulamak
+için oluşturulan ayrı bir sentetik Linux hedefidir; `rrdcached` ölçümü değildir.
+20,1 saniyelik pencerede 120 worker'ın tamamı `worker` adıyla çalıştı.
+Başlangıç ve bitiş envanteri aynı 121 TID'yi içerdi: 120 worker ve ana thread.
+
+- On-CPU: 120/120 worker TID, 763 çağrı yolu, 5.368 örnek.
+- Off-CPU: 120/120 worker TID, 225 çağrı yolu.
+- Eksik veya hedef dışı worker TID: 0.
+- Ana thread `join` içinde bekledi; stack örneği uydurulmadı.
+- Sürüm 2 şema ve 11 dosyanın SHA-256 kontrolü geçti.
+- Test hedefi kapatıldı; ardından hedef PID ve bpftrace süreci kalmadı.
+
+Güncel collector her iki stack dosyasında `worker [tid=123]` kökünü
+kullanır. Önceki ölçümlerde aynı ad ve çağrı yolu birleştiğinden onları
+yeniden TID'lere ayırmak mümkün değildir; yeni ölçüm gerekir.
+Thread kimliğinin iki koşu arasında değişmesi Diff'e sahte değişim
+eklemez: koşular thread adına göre karşılaştırılır.
+Bu değişiklikler Linux'ta 152 hedefli regresyon testiyle doğrulandı.
+
 ## Viewer'da açma
 
 Güncel `viewer/dist/index.html` dosyasını tarayıcıda açıp **Runs → choose
 files** ile paketleri seçin. Önce **Overview** kalite uyarılarına, sonra
 **Flame**, **Threads** ve standard paket için **Wakeups** ekranlarına bakın.
 Sayfa yenilendiğinde paketler yeniden seçilmelidir.
+Üst bilgi `bundles v1–v2` ve build kimliğini gösterir. Yalnız sürüm 1
+okuduğunu söyleyen sayfa eski bir viewer'dır; manifest'i değiştirmek yerine
+güncel `viewer/dist/index.html` dosyasını açın veya Docker servisini
+`docker compose up -d --build --force-recreate viewer` ile yenileyin.

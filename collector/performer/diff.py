@@ -22,6 +22,7 @@ has in common between runs.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -40,6 +41,7 @@ STACK_KINDS: Tuple[Tuple[str, str, str, str], ...] = (
 
 DEFAULT_MIN_SHARE = 0.0001
 DEFAULT_TOP = 20
+_THREAD_ID_RE = re.compile(r" \[tid=[1-9][0-9]*\]$")
 
 
 # --------------------------------------------------------------------------
@@ -120,6 +122,10 @@ def normalise_path(stack: str, *, merge_threads: bool) -> str:
     frames = stack.split(";")
     if merge_threads and len(frames) > 1:
         frames = frames[1:]
+    elif frames:
+        # TIDs identify threads within a capture, but are not stable across
+        # runs. Keep comparisons grouped by the thread's display name.
+        frames[0] = _THREAD_ID_RE.sub("", frames[0])
     return ";".join(clean_frame(frame) for frame in frames)
 
 

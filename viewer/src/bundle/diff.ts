@@ -20,6 +20,7 @@
 
 import {
   buildTree,
+  threadIdentity,
   type FlameNode,
   type FoldedLine,
   type ParseResult,
@@ -135,8 +136,9 @@ function fold(
   for (const line of result.lines) {
     const root = line.frames[0] ?? "";
     if (needle && !root.toLowerCase().includes(needle)) continue;
-    const frames =
-      merge && line.frames.length > 1 ? line.frames.slice(1) : line.frames;
+    const frames = merge && line.frames.length > 1
+      ? line.frames.slice(1)
+      : [threadIdentity(root).name, ...line.frames.slice(1)];
     const key = pathKey(frames);
     totals.set(key, (totals.get(key) ?? 0) + line.value);
     total += line.value;

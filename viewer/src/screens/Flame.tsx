@@ -23,7 +23,7 @@ import { FlameGraph } from "../components/FlameGraph";
 import { Empty, Panel } from "../components/ui";
 
 const IDLE_CHOICES = [
-  { label: "show all threads", share: 0 },
+  { label: "all recorded stacks", share: 0 },
   { label: "hide below 0.1%", share: 0.001 },
   { label: "hide below 1%", share: 0.01 },
   { label: "hide below 5%", share: 0.05 },

@@ -250,9 +250,18 @@ export function filterLines(
   if (!needle && minShare <= 0 && !merge) return result;
 
   const keepThread = new Set<string>();
+  const identityKey = (root: string) => {
+    const { tid } = threadIdentity(root);
+    return tid === null ? `name:${root}` : `tid:${tid}`;
+  };
   if (minShare > 0) {
+    const totals = new Map<string, number>();
     for (const thread of threadTotals(result)) {
-      if (thread.share >= minShare) keepThread.add(thread.name);
+      const key = identityKey(thread.name);
+      totals.set(key, (totals.get(key) ?? 0) + thread.value);
+    }
+    for (const [key, value] of totals) {
+      if (result.total > 0 && value / result.total >= minShare) keepThread.add(key);
     }
   }
 
@@ -264,7 +273,7 @@ export function filterLines(
     const root = line.frames[0] ?? "";
     if (tidFilter !== null ? threadIdentity(root).tid !== tidFilter
       : needle && !root.toLowerCase().includes(needle)) continue;
-    if (minShare > 0 && !keepThread.has(root)) continue;
+    if (minShare > 0 && !keepThread.has(identityKey(root))) continue;
     if (merge && line.frames.length > 1) {
       lines.push({ frames: line.frames.slice(1), value: line.value });
     } else {

@@ -165,6 +165,16 @@ describe("filterLines", () => {
     expect(filterLines(parsed, { threadFilter: "[tid=123]", mergeThreads: true }).total).toBe(7);
   });
 
+  it("applies the share threshold per TID even when the thread changes name", () => {
+    const parsed = parseFolded([
+      "before [tid=123];run 1", "after [tid=123];run 1",
+      "busy [tid=456];run 98",
+    ].join("\n"));
+    const filtered = filterLines(parsed, { hideBelowShare: 0.015 });
+    expect(filtered.total).toBe(100);
+    expect(filtered.lines).toHaveLength(3);
+  });
+
   it("returns the input untouched when nothing is asked of it", () => {
     const parsed = parseFolded(SAMPLE);
     expect(filterLines(parsed, {})).toBe(parsed);
