@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from . import layout
 from .bundle import Bundle, ValidationReport
+from .errors import BundleError
 
 LEVEL_ERROR = "error"
 LEVEL_WARN = "warn"
@@ -33,6 +34,29 @@ class Thresholds:
 
 
 THRESHOLDS = Thresholds()
+
+
+def usable_overhead_pct(quality: Dict[str, Any]) -> Optional[float]:
+    """Return a measured overhead, including valid zeroes.
+
+    Older bundles recorded zero even when their quality notes said the
+    estimate was unavailable or unreliable. Honor those notes when reading
+    them; new bundles use null for the same cases.
+    """
+    value = quality.get("estimated_overhead_pct")
+    if not isinstance(value, (int, float)):
+        return None
+    notes = quality.get("notes") or []
+    if any(
+        isinstance(note, str)
+        and (
+            "overhead could not be estimated" in note
+            or "overhead estimate is unreliable" in note
+        )
+        for note in notes
+    ):
+        return None
+    return float(value)
 
 
 @dataclass(frozen=True)
@@ -108,8 +132,8 @@ def quality_flags(
             )
         )
 
-    overhead = quality.get("estimated_overhead_pct")
-    if isinstance(overhead, (int, float)):
+    overhead = usable_overhead_pct(quality)
+    if overhead is not None:
         if overhead > thresholds.overhead_pct_error:
             flags.append(
                 Flag(
@@ -175,6 +199,8 @@ def quality_flags(
                 )
             )
 
+    for note in quality.get("notes", []):
+        flags.append(Flag(LEVEL_WARN, "quality_note", str(note)))
     for warning in doc.get("warnings", []):
         flags.append(Flag(LEVEL_WARN, "run_warning", str(warning)))
 
@@ -182,12 +208,59 @@ def quality_flags(
     return flags
 
 
+def _runqlat_flag(bundle: Bundle) -> Optional[Flag]:
+    hint = "Recollect with the corrected runqlat probe; aggregated old data cannot be repaired."
+    if bundle.manifest.get("schema_version") == 1:
+        return Flag(
+            LEVEL_ERROR,
+            "runqlat_unreliable",
+            "legacy run queue histogram includes system-wide tasks; ignore this histogram",
+            hint,
+        )
+    try:
+        histogram = bundle.read_json(layout.HIST_RUNQLAT)
+    except BundleError:
+        histogram = None
+    series_list = histogram.get("series") if isinstance(histogram, dict) else None
+    if not isinstance(series_list, list):
+        return Flag(LEVEL_ERROR, "runqlat_unreadable", "run queue histogram could not be read")
+    duration = bundle.manifest.get("actual_duration_s") or bundle.manifest.get("duration_s") or 0
+    if not isinstance(duration, (int, float)):
+        duration = 0
+    max_plausible_us = max(duration * 2, duration + 30) * 1_000_000
+    for series in series_list:
+        buckets = series.get("buckets") if isinstance(series, dict) else None
+        if not isinstance(buckets, list):
+            return Flag(LEVEL_ERROR, "runqlat_unreadable", "run queue histogram could not be read")
+        for bucket in buckets:
+            if not isinstance(bucket, dict) or not isinstance(bucket.get("count"), (int, float)):
+                return Flag(LEVEL_ERROR, "runqlat_unreadable", "run queue histogram could not be read")
+            lo = bucket.get("lo")
+            if lo is not None and not isinstance(lo, (int, float)):
+                return Flag(LEVEL_ERROR, "runqlat_unreadable", "run queue histogram could not be read")
+            if bucket["count"] > 0 and lo is not None and lo >= max_plausible_us:
+                return Flag(
+                    LEVEL_ERROR,
+                    "runqlat_unreliable",
+                    "run queue histogram contains waits longer than the collection window; ignore this histogram",
+                    hint,
+                )
+    return None
+
+
 def build_summary(bundle: Bundle, *, validate: bool = True) -> Summary:
     report = bundle.validate() if validate else None
-    pmu = bundle.read_json(layout.PMU_COUNTERS) if layout.PMU_COUNTERS in bundle.paths() else None
+    paths = bundle.paths()
+    pmu = bundle.read_json(layout.PMU_COUNTERS) if layout.PMU_COUNTERS in paths else None
+    flags = quality_flags(bundle.manifest)
+    if layout.HIST_RUNQLAT in paths:
+        flag = _runqlat_flag(bundle)
+        if flag:
+            flags.append(flag)
+            flags.sort(key=lambda flag: _LEVEL_ORDER[flag.level])
     return Summary(
         manifest=bundle.manifest,
-        flags=quality_flags(bundle.manifest),
+        flags=flags,
         validation=report,
         pmu=pmu,
     )
@@ -283,9 +356,10 @@ def render(summary: Summary, *, origin: Optional[str] = None, verbose: bool = Fa
     )
     if isinstance(ratio, (int, float)):
         lines.append(_row("unknown frames", f"{ratio:.1%}"))
-    overhead = quality.get("estimated_overhead_pct")
-    if isinstance(overhead, (int, float)):
-        lines.append(_row("est. overhead", f"{overhead:.1f}%"))
+    overhead = usable_overhead_pct(quality)
+    lines.append(
+        _row("est. overhead", f"{overhead:.1f}%" if overhead is not None else "n/a")
+    )
 
     if summary.pmu:
         pmu = summary.pmu

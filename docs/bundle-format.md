@@ -1,4 +1,4 @@
-# Bundle format (schema_version 1)
+# Bundle format (schema_version 2)
 
 The contract between the collector and the viewer. Everything downstream —
 probes, parsers, diff algorithm, UI — is written against this document and the
@@ -43,7 +43,7 @@ run_20260806T142530Z_baseline/
 │   ├── futex.folded
 │   └── offwake.folded       optional
 ├── hist/                    histograms and aggregation tables
-│   ├── runqlat.json         run queue latency, plus per-thread stats
+│   ├── runqlat.json         run queue latency, plus per-comm stats (same names aggregate)
 │   ├── offcpu_duration.json blocked interval distribution
 │   ├── offcpu_by_state.json blocked time split by task state
 │   ├── futex_by_addr.json   wait time per lock address  <- the hot lock
@@ -88,7 +88,7 @@ Unknown keys are rejected (`additionalProperties: false`).
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "run_id": "20260806T142530Z-baseline",
   "label": "baseline",
   "tags": ["before-timer-fix", "8-core"],
@@ -163,13 +163,17 @@ The reason a viewer can refuse to draw a graph.
 |---|---|
 | `frame_pointers_ok` | preflight's verdict on whether the target has usable frame pointers |
 | `unknown_frame_ratio` | fraction of sampled frames that are `[unknown]`, 0..1 |
-| `estimated_overhead_pct` | percentage by which the target's CPU use rose while traced |
+| `estimated_overhead_pct` | percentage by which the target's CPU use rose while traced; `null` when samples are missing or the baseline is unstable |
 
 `estimated_overhead_pct` compares the target's CPU over the traced window
-against the average of two untraced samples, one taken before the run and one
-after (`quality.overhead.cpu_pct_before` / `cpu_pct_during`). Comparing before
+against the higher of two untraced samples, one taken before the run and one
+after (`quality.overhead.cpu_pct_before` / `cpu_pct_after`; traced CPU is
+`cpu_pct_during`). Comparing before
 with after would compare two untraced states and always report roughly zero.
 Negative results clamp to zero — tracing cannot make the target cheaper.
+An unavailable or unreliable version 2 estimate is `null`, never `0`. Some
+version 1 bundles wrote `0` in this case; readers use the accompanying quality
+note to distinguish it from a measured zero.
 
 Thresholds applied by `performer/report.py` — and, from M3, by the viewer:
 
@@ -228,7 +232,7 @@ an `lhist` underflow bucket has `lo: null`. One file may carry several keyed
 `series`.
 
 ```json
-{ "schema_version": 1, "kind": "histogram", "name": "runqlat", "unit": "us",
+{ "schema_version": 2, "kind": "histogram", "name": "runqlat", "unit": "us",
   "source": "runqlat.bt:@runq_us",
   "series": [ { "key": "", "buckets": [ { "lo": 0, "hi": 1, "count": 12 } ],
                 "total_count": 12 } ] }
@@ -239,7 +243,7 @@ keyed map such as futex wait time per `uaddr` or total time per syscall.
 Column metadata is explicit so the viewer sorts and formats without guessing.
 
 ```json
-{ "schema_version": 1, "kind": "table", "name": "futex_by_addr",
+{ "schema_version": 2, "kind": "table", "name": "futex_by_addr",
   "columns": [ { "id": "addr", "type": "hex" },
                { "id": "total_us", "type": "int", "unit": "us", "sort": "desc" } ],
   "rows": [ ["0x7f3c8a001240", 6820000] ] }
@@ -253,7 +257,7 @@ root first, the same shape as `stacks/*.folded` without the trailing value.
 `futex_sites.json` is the reason the type exists:
 
 ```json
-{ "schema_version": 1, "kind": "table", "name": "futex_sites",
+{ "schema_version": 2, "kind": "table", "name": "futex_sites",
   "columns": [ { "id": "addr", "type": "hex" },
                { "id": "stack", "type": "stack" },
                { "id": "total_us", "type": "int", "unit": "us", "sort": "desc" } ],
@@ -287,7 +291,7 @@ Directed edge list from `sched:sched_wakeup`
 ([`wakeup_edges.schema.json`](../schema/wakeup_edges.schema.json)):
 
 ```json
-{ "schema_version": 1,
+{ "schema_version": 2,
   "nodes": [ { "tid": 205853, "name": "TimerWheel0" } ],
   "edges": [ { "from_tid": 205853, "to_tid": 205871, "count": 4210,
                "total_us": 88213.0 } ] }
@@ -323,6 +327,9 @@ dump and is therefore always a little longer than the run.
 ## Compatibility
 
 `schema_version` is a single integer, present in `manifest.json` and in each
-payload document. A reader that does not recognise the version must refuse the
-bundle rather than guess. Additive, optional fields do not bump it; removing a
-field, changing a type, or changing the meaning of a value does.
+payload document. The current collector writes version 2. The current viewer
+and validator also read version 1 bundles. Version 2 permits
+`quality.estimated_overhead_pct: null`; version 1 requires a number. An older
+viewer must refuse version 2 rather than guess. Additive, optional fields do
+not bump the version; removing a field, changing a type, or changing the
+meaning of a value does.

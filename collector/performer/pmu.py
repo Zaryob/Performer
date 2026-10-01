@@ -259,11 +259,28 @@ class Session:
                     groups[group] = self._read_group(fds)
                 except OSError as error:
                     self.warnings.append(f"tid {record.tid}: PMU read failed: {error}")
+            # A task that never ran can report 0/0 for every event group.
+            # If another group on the same thread did run, a 0/0 group is a
+            # counter scheduling failure instead of an idle thread.
+            idle_thread = record.enabled_at is not None and bool(groups) and all(
+                enabled == running == first == second == 0
+                for enabled, running, first, second in groups.values()
+            )
             for group, (enabled, running, first, second) in groups.items():
-                if not running or not enabled or running < enabled * 0.9:
+                # A task-scoped event may never be scheduled if its thread
+                # remains idle throughout the capture. The kernel then reports
+                # zero counts and zero enabled/running time: no samples, not
+                # counter multiplexing. A nonzero enabled time with zero
+                # running time still means the measurement was unavailable.
+                if not idle_thread and (not running or not enabled or running < enabled * 0.9):
                     poor_scheduling = True
                 for name, raw in zip(group, (first, second)):
-                    scaled = round(raw * enabled / running, 2) if running else None
+                    if idle_thread:
+                        scaled = 0.0
+                    elif running:
+                        scaled = round(raw * enabled / running, 2)
+                    else:
+                        scaled = None
                     events[name] = {
                         "raw": raw,
                         "scaled": scaled,

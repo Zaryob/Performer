@@ -60,6 +60,89 @@ class PmuDocumentTests(unittest.TestCase):
         errors = list(load_schema(layout.schema_path("pmu.schema.json")).validate(doc))
         self.assertEqual(errors, [])
 
+    def test_idle_thread_with_no_scheduled_time_keeps_active_totals_valid(self):
+        session = pmu.Session(123)
+        session.groups = list(pmu.EVENT_GROUPS)
+        session._started_at = 1.0
+        session._ended_at = 3.0
+        session._initial_count = 2
+        active = pmu.ThreadCounters(123, 100, "active", enabled_at=1.0)
+        idle = pmu.ThreadCounters(124, 101, "idle", enabled_at=1.0)
+        for group in pmu.EVENT_GROUPS:
+            active.samples[group] = (100, 100, 40, 20)
+            idle.samples[group] = (0, 0, 0, 0)
+        session.threads[(123, 100)] = active
+        session.threads[(124, 101)] = idle
+
+        doc = session.document()
+        self.assertEqual(doc["status"], "ok")
+        self.assertEqual(doc["warnings"], [])
+        self.assertEqual(doc["threads_measured"], 2)
+        for event in doc["events"]:
+            self.assertEqual(doc["totals"][event]["scaled"], 40 if event in (
+                "cycles", "branches", "cache_references"
+            ) else 20)
+            self.assertEqual(doc["threads"][1]["events"][event]["scaled"], 0.0)
+        errors = list(load_schema(layout.schema_path("pmu.schema.json")).validate(doc))
+        self.assertEqual(errors, [])
+
+    def test_enabled_but_never_running_still_marks_multiplex_failure(self):
+        session = pmu.Session(123)
+        session.groups = [pmu.EVENT_GROUPS[0]]
+        session._started_at = 1.0
+        session._ended_at = 3.0
+        record = pmu.ThreadCounters(123, 100, "worker", enabled_at=1.0)
+        record.samples[pmu.EVENT_GROUPS[0]] = (100, 0, 0, 0)
+        session.threads[(123, 100)] = record
+
+        doc = session.document()
+        self.assertEqual(doc["status"], "partial")
+        self.assertIsNone(doc["totals"]["cycles"]["scaled"])
+        self.assertTrue(any("less than 90%" in note for note in doc["warnings"]))
+
+    def test_zero_time_on_one_group_of_active_thread_is_not_idle(self):
+        session = pmu.Session(123)
+        session.groups = list(pmu.EVENT_GROUPS)
+        session._started_at = 1.0
+        session._ended_at = 3.0
+        record = pmu.ThreadCounters(123, 100, "worker", enabled_at=1.0)
+        record.samples[pmu.EVENT_GROUPS[0]] = (100, 100, 40, 20)
+        record.samples[pmu.EVENT_GROUPS[1]] = (0, 0, 0, 0)
+        record.samples[pmu.EVENT_GROUPS[2]] = (100, 100, 40, 20)
+        session.threads[(123, 100)] = record
+
+        doc = session.document()
+        self.assertEqual(doc["status"], "partial")
+        self.assertEqual(doc["totals"]["cycles"]["scaled"], 40)
+        self.assertIsNone(doc["totals"]["branches"]["scaled"])
+        self.assertTrue(any("less than 90%" in note for note in doc["warnings"]))
+
+    def test_nonzero_raw_count_with_zero_time_is_not_valid_zero(self):
+        session = pmu.Session(123)
+        session.groups = [pmu.EVENT_GROUPS[0]]
+        session._started_at = 1.0
+        session._ended_at = 3.0
+        record = pmu.ThreadCounters(123, 100, "worker", enabled_at=1.0)
+        record.samples[pmu.EVENT_GROUPS[0]] = (0, 0, 1, 0)
+        session.threads[(123, 100)] = record
+
+        doc = session.document()
+        self.assertEqual(doc["status"], "partial")
+        self.assertIsNone(doc["totals"]["cycles"]["scaled"])
+
+    def test_record_never_enabled_is_not_mistaken_for_idle(self):
+        session = pmu.Session(123)
+        session.groups = [pmu.EVENT_GROUPS[0]]
+        session._started_at = 1.0
+        session._ended_at = 3.0
+        record = pmu.ThreadCounters(123, 100, "worker")
+        record.samples[pmu.EVENT_GROUPS[0]] = (0, 0, 0, 0)
+        session.threads[(123, 100)] = record
+
+        doc = session.document()
+        self.assertEqual(doc["status"], "partial")
+        self.assertIsNone(doc["totals"]["cycles"]["scaled"])
+
     def test_failed_thread_attachment_is_not_retried_every_scan(self):
         session = pmu.Session(123)
         session.groups = [pmu.EVENT_GROUPS[0]]

@@ -123,8 +123,8 @@ RUNQLAT = """@_queued_at[4242]: 91838740021
 [2, 4)               611 |@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@                 |
 [4, 8)               204 |@@@@@@@@@@@@                                        |
 [64, 128)             18 |@                                                   |
-@runq_by_thread[{comm}]: count 421, average 3, total 1263
-@runq_by_thread[worker]: count 1347, average 2, total 2694
+@runq_by_comm[{comm}]: count 421, average 3, total 1263
+@runq_by_comm[worker]: count 1347, average 2, total 2694
 """
 
 FUTEX = """@futex_us[

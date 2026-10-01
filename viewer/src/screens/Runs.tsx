@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import type { Bundle } from "../bundle/load";
 import { loadBundleFile, BundleError, runDuration } from "../bundle/load";
-import { qualityFlags, worstLevel } from "../quality";
+import { bundleQualityFlags, formatOverheadPct, worstLevel } from "../quality";
 import { Empty, Panel, StatusBadge, formatDuration } from "../components/ui";
 
 export interface RunsProps {
@@ -126,7 +126,7 @@ export function Runs({ bundles, selected, onSelect, onAdd, onRemove }: RunsProps
               <tbody>
                 {bundles.map((bundle) => {
                   const manifest = bundle.manifest;
-                  const flags = qualityFlags(manifest);
+                  const flags = bundleQualityFlags(bundle);
                   const worst = worstLevel(flags);
                   const isSelected = bundle.key === selected;
                   return (
@@ -156,7 +156,7 @@ export function Runs({ bundles, selected, onSelect, onAdd, onRemove }: RunsProps
                         {manifest.target.thread_count_start}
                       </td>
                       <td className="py-1.5 pr-3 text-right tabular-nums text-slate-300">
-                        {manifest.quality.estimated_overhead_pct.toFixed(1)}%
+                        {formatOverheadPct(manifest.quality)}
                       </td>
                       <td className="py-1.5 pr-3">
                         <StatusBadge status={manifest.status} />

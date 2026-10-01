@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "threads"],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "enum": [1, 2] },
     "sampled_at_start": { "type": ["string", "null"] },
     "sampled_at_end": { "type": ["string", "null"] },
     "clk_tck": {

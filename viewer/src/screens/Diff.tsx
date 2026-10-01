@@ -34,7 +34,7 @@ import {
   type WidthBasis,
 } from "../bundle/diff";
 import { STACK_KINDS, type StackKindId } from "../bundle/types";
-import { stacksAreTrustworthy } from "../quality";
+import { stacksAreTrustworthy, usableOverheadPct } from "../quality";
 import { FlameGraph } from "../components/FlameGraph";
 import { Empty, Panel, formatDuration } from "../components/ui";
 import { ratio as pmuRatio, readPmu, runningShare, value as pmuValue } from "../pmu";
@@ -497,9 +497,9 @@ function comparability(a: Bundle, b: Bundle): string[] {
       );
     }
   }
-  const before = a.manifest.quality.estimated_overhead_pct;
-  const after = b.manifest.quality.estimated_overhead_pct;
-  if (Math.abs(before - after) > 10) {
+  const before = usableOverheadPct(a.manifest.quality);
+  const after = usableOverheadPct(b.manifest.quality);
+  if (before !== null && after !== null && Math.abs(before - after) > 10) {
     problems.push(
       `Measurement overhead differed a lot between the runs (${before.toFixed(0)}% vs ${after.toFixed(0)}%). ` +
         "Part of what changed may be the cost of measuring.",

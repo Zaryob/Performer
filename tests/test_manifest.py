@@ -75,6 +75,17 @@ class BuildTests(unittest.TestCase):
     def test_built_manifest_validates(self):
         self.assertEqual(validate_manifest(_sample()), [])
 
+    def test_nullable_overhead_requires_bundle_version_two(self):
+        current = _sample()
+        self.assertEqual(current["schema_version"], 2)
+        self.assertIsNone(current["quality"]["estimated_overhead_pct"])
+        self.assertEqual(validate_manifest(current), [])
+
+        old = dict(current, schema_version=1)
+        self.assertNotEqual(validate_manifest(old), [])
+        old["quality"] = dict(old["quality"], estimated_overhead_pct=0.0)
+        self.assertEqual(validate_manifest(old), [])
+
     def test_run_id_encodes_time_and_label(self):
         started = _dt.datetime(2026, 8, 6, 14, 25, 30, tzinfo=_dt.timezone.utc)
         self.assertEqual(make_run_id("baseline", started), "20260806T142530Z-baseline")

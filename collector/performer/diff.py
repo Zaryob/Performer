@@ -25,7 +25,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from . import layout
+from . import layout, report
 from .bundle import Bundle
 from .parse.stacks import clean_frame
 
@@ -352,7 +352,7 @@ def _run_summary(manifest: Dict[str, Any]) -> Dict[str, Any]:
         "thread_count_start": target.get("thread_count_start"),
         "thread_count_end": target.get("thread_count_end"),
         "unknown_frame_ratio": quality.get("unknown_frame_ratio"),
-        "estimated_overhead_pct": quality.get("estimated_overhead_pct"),
+        "estimated_overhead_pct": report.usable_overhead_pct(quality),
     }
 
 
@@ -380,9 +380,13 @@ def _caveats(a: Dict[str, Any], b: Dict[str, Any]) -> List[str]:
                 f"{side} ({manifest.get('label')}) has {ratio * 100:.0f}% unresolved frames; "
                 "a diff of unresolved stacks is a confident picture of nothing"
             )
-    overhead_a = (a.get("quality") or {}).get("estimated_overhead_pct") or 0
-    overhead_b = (b.get("quality") or {}).get("estimated_overhead_pct") or 0
-    if abs(float(overhead_a) - float(overhead_b)) > 10:
+    overhead_a = report.usable_overhead_pct(a.get("quality") or {})
+    overhead_b = report.usable_overhead_pct(b.get("quality") or {})
+    if (
+        overhead_a is not None
+        and overhead_b is not None
+        and abs(overhead_a - overhead_b) > 10
+    ):
         notes.append(
             f"measurement overhead differed a lot ({overhead_a:.0f}% vs {overhead_b:.0f}%); "
             "part of what changed may be the cost of measuring"

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { qualityFlags, stacksAreTrustworthy, worstLevel, THRESHOLDS } from "../quality";
-import type { Manifest } from "../bundle/types";
+import { bundleQualityFlags, formatOverheadPct, qualityFlags, stacksAreTrustworthy, usableOverheadPct, worstLevel, THRESHOLDS } from "../quality";
+import type { Bundle } from "../bundle/load";
+import { PATHS, type Manifest } from "../bundle/types";
 
 function manifest(overrides: Partial<Manifest> = {}): Manifest {
   return {
@@ -126,6 +127,99 @@ describe("qualityFlags", () => {
     );
     expect(flags[0]!.level).toBe("error");
     expect(worstLevel(flags)).toBe("error");
+  });
+});
+
+describe("overhead estimate", () => {
+  it("shows an unavailable estimate as n/a while retaining its warning", () => {
+    const run = manifest({
+      quality: {
+        frame_pointers_ok: true,
+        unknown_frame_ratio: 0,
+        estimated_overhead_pct: null,
+        notes: ["overhead could not be estimated: CPU baseline or samples were unavailable"],
+      },
+    });
+    expect(formatOverheadPct(run.quality)).toBe("n/a");
+    expect(qualityFlags(run).some((flag) => flag.code === "quality_note")).toBe(true);
+  });
+
+  it("hides the false zero in older unavailable and unstable bundles", () => {
+    for (const note of [
+      "overhead could not be estimated: CPU samples were unavailable",
+      "the target's untraced CPU differed by 40% between samples, so the overhead estimate is unreliable",
+    ]) {
+      const quality = {
+        frame_pointers_ok: true,
+        unknown_frame_ratio: 0,
+        estimated_overhead_pct: 0,
+        notes: [note],
+      };
+      expect(usableOverheadPct(quality)).toBeNull();
+      expect(formatOverheadPct(quality)).toBe("n/a");
+    }
+  });
+
+  it("preserves a measured zero", () => {
+    const quality = {
+      frame_pointers_ok: true,
+      unknown_frame_ratio: 0,
+      estimated_overhead_pct: 0,
+      overhead: { cpu_pct_before: 100, cpu_pct_during: 90 },
+    };
+    expect(usableOverheadPct(quality)).toBe(0);
+    expect(formatOverheadPct(quality)).toBe("0.0%");
+  });
+});
+
+describe("old run queue histograms", () => {
+  function bundleWithBucket(lo: number): Bundle {
+    const histogram = {
+      schema_version: 1,
+      kind: "histogram",
+      name: "runqlat",
+      unit: "us",
+      series: [{ key: "", buckets: [{ lo, hi: lo * 2, count: 1 }] }],
+    };
+    return {
+      key: "test",
+      fileName: "test.tgz",
+      manifest: manifest({ schema_version: 2, duration_s: 45 }),
+      system: null,
+      threads: null,
+      files: new Map([[PATHS.runqlat, new TextEncoder().encode(JSON.stringify(histogram))]]),
+      loadedAt: 0,
+    };
+  }
+
+  it("flags a 35 minute wait in a 45 second capture", () => {
+    expect(bundleQualityFlags(bundleWithBucket(2_147_483_648)).some(
+      (flag) => flag.code === "runqlat_unreliable" && flag.level === "error",
+    )).toBe(true);
+  });
+
+  it("keeps plausible waits available", () => {
+    expect(bundleQualityFlags(bundleWithBucket(32)).some(
+      (flag) => flag.code === "runqlat_unreliable",
+    )).toBe(false);
+  });
+
+  it("flags legacy system-wide data even with plausible waits", () => {
+    const bundle = bundleWithBucket(32);
+    bundle.manifest.schema_version = 1;
+    expect(bundleQualityFlags(bundle).some(
+      (flag) => flag.message.includes("system-wide"),
+    )).toBe(true);
+  });
+
+  it("reports an unreadable artifact without crashing", () => {
+    for (const body of ["[]", "{", "null"]) {
+      const bundle = bundleWithBucket(32);
+      bundle.files.set(PATHS.runqlat, new TextEncoder().encode(body));
+      expect(bundleQualityFlags(bundle).some(
+        (flag) => flag.code === "runqlat_unreadable",
+      )).toBe(true);
+    }
   });
 });
 

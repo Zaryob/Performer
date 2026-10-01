@@ -17,6 +17,10 @@ disappear silently. The optional payload is compatible with older bundles.
 New threads are checked every 200 ms, so shorter-lived threads may be missed.
 Coverage is the time counters were attached, not proof that a thread ran for
 the whole measurement window.
+An enabled thread whose event groups all report zero counts and zero
+enabled/running time is treated as idle. Its scaled counts are zero and do
+not invalidate active threads' totals. A nonzero enabled time with no running
+time, or an empty group alongside an active group, still marks PMU as partial.
 
 Overview shows process totals and ratios; Threads shows cycles, IPC, and
 coverage per thread; Diff compares matching CPU models and normalizes totals

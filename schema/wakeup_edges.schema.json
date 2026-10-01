@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "edges"],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "enum": [1, 2] },
     "source": { "type": "string" },
     "nodes": {
       "description": "Optional node metadata. Threads referenced by an edge but missing here are still valid; the viewer falls back to meta/threads.json and then to the bare tid.",

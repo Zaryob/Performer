@@ -8,7 +8,8 @@
  * case where guessing would produce a confident wrong answer.
  */
 
-export const SUPPORTED_SCHEMA_VERSION = 1;
+export const SUPPORTED_SCHEMA_VERSION = 2;
+export const MIN_SUPPORTED_SCHEMA_VERSION = 1;
 
 export type ProbeStatus = "ok" | "partial" | "failed" | "skipped";
 export type RunStatus = "ok" | "partial" | "failed";
@@ -37,7 +38,7 @@ export interface TargetInfo {
 export interface Quality {
   frame_pointers_ok: boolean;
   unknown_frame_ratio: number;
-  estimated_overhead_pct: number;
+  estimated_overhead_pct: number | null;
   unknown_frame_samples?: number;
   total_frame_samples?: number;
   overhead?: {

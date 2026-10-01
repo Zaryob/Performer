@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from . import layout
+
 PROC = Path("/proc")
 
 try:
@@ -404,7 +406,7 @@ def baseline_disagreement(samples: Sequence[Optional[Dict[str, Any]]]) -> Option
 def overhead_pct(baseline_pct: Optional[float], during_pct: Optional[float]) -> float:
     """Percentage of target CPU added by the measurement.
 
-    The baseline is the average of the untraced samples taken either side of
+    The baseline is the higher of the untraced samples taken either side of
     the run; ``during_pct`` is the target's CPU over the traced window itself.
     Comparing before with after would compare two untraced states and always
     report roughly zero -- the cost has to be measured while it is being paid.
@@ -541,7 +543,7 @@ def system_info(pid: Optional[int] = None) -> Dict[str, Any]:
         load = None
     soft, _hard = nofile_limit()
     return {
-        "schema_version": 1,
+        "schema_version": layout.SCHEMA_VERSION,
         "hostname": uname.nodename or None,
         "kernel": uname.release,
         "arch": uname.machine,
@@ -563,7 +565,7 @@ def target_info(pid: int) -> Dict[str, Any]:
     """The static half of ``meta/target.json``."""
     stat = read_stat(pid)
     return {
-        "schema_version": 1,
+        "schema_version": layout.SCHEMA_VERSION,
         "pid": pid,
         "comm": (stat.comm if stat else read_comm(pid)) or "unknown",
         "cmdline": read_cmdline(pid),

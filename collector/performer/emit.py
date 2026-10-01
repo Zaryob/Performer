@@ -110,9 +110,8 @@ def _stats_as_series(
 ) -> List[hist_parse.Series]:
     """Carry ``stats()`` output as bucketless series.
 
-    A per-thread stats map has no buckets, but count/avg/total are exactly
-    what the Threads table wants, so it is kept in the same document rather
-    than thrown away for not being a histogram.
+    A keyed stats map has no buckets, but count/avg/total can still be kept
+    in the same document rather than thrown away for lacking a histogram.
     """
     return [
         hist_parse.Series(key=key, buckets=[], stats=values)
@@ -212,6 +211,26 @@ def emit_runqlat(context: EmitContext, text: str) -> EmitResult:
     result = EmitResult()
     dump = hist_parse.parse_maps(text)
     result.warnings.extend(dump.warnings)
+    # A queue timestamp is recorded only after the probe attaches. Even with
+    # attachment and shutdown grace, a wait longer than twice the measured
+    # window (or 30 seconds beyond it) cannot be real. Older versions keyed
+    # every task by TID, including idle TID 0 on all CPUs, and could produce
+    # unsigned-underflow bins spanning many minutes in a short run. The
+    # aggregate stats cannot be repaired after the fact, so discard the whole
+    # document rather than present a plausible-looking but polluted profile.
+    longest_possible_us = (
+        max(context.duration_s * 2, context.duration_s + 30) * 1_000_000
+    )
+    if any(
+        bucket.count and bucket.lo is not None and bucket.lo >= longest_possible_us
+        for series in dump.histograms.get("runq_us", [])
+        for bucket in series.buckets
+    ):
+        result.warnings.append(
+            "run queue latency exceeded the measurement window; "
+            "discarded the contaminated histogram and thread statistics"
+        )
+        return result
     path = _emit_histogram(
         context,
         dump,
@@ -220,7 +239,8 @@ def emit_runqlat(context: EmitContext, text: str) -> EmitResult:
         name="runqlat",
         unit="us",
         source="runqlat.bt:@runq_us",
-        extra_series=_stats_as_series(dump, "runq_by_thread"),
+        extra_series=_stats_as_series(dump, "runq_by_comm")
+        or _stats_as_series(dump, "runq_by_thread"),
     )
     if path:
         result.outputs.append(path)

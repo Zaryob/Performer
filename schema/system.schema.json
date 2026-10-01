@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "kernel", "cpu_count"],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "enum": [1, 2] },
     "hostname": { "type": ["string", "null"] },
     "kernel": { "type": "string", "minLength": 1 },
     "arch": { "type": ["string", "null"] },

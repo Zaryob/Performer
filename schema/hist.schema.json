@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "kind", "name", "unit", "series"],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "enum": [1, 2] },
     "kind": { "const": "histogram" },
     "name": {
       "description": "Logical name, e.g. 'runqlat'. Matches the file stem.",

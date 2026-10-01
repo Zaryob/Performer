@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import unittest
 
-from performer import proc
+from performer import layout, proc
 
 from unittest import mock
 
@@ -54,7 +54,7 @@ class SelfTests(unittest.TestCase):
 
     def test_system_info_is_schema_shaped(self):
         info = proc.system_info(os.getpid())
-        self.assertEqual(info["schema_version"], 1)
+        self.assertEqual(info["schema_version"], layout.SCHEMA_VERSION)
         self.assertTrue(info["kernel"])
         self.assertGreaterEqual(info["cpu_count"], 1)
         self.assertIn("cgroup", info)

@@ -592,8 +592,8 @@ def _build_quality(
         notes.append("stack quality could not be measured during preflight")
     if options.ignore_quality:
         notes.append("frame pointer check overridden with --ignore-quality")
-    if baseline_pct is None or during_pct is None:
-        notes.append("overhead could not be estimated: CPU samples were unavailable")
+    if baseline_pct is None or baseline_pct <= 0 or during_pct is None:
+        notes.append("overhead could not be estimated: CPU baseline or samples were unavailable")
     disagreement = proc.baseline_disagreement([report.cpu_before, cpu_after])
     if disagreement is not None and disagreement > 0.25:
         notes.append(
@@ -616,11 +616,17 @@ def _build_quality(
     total = report.total_frame_samples
     unknown = report.unknown_frame_samples
     ratio = round(unknown / total, 4) if total else report.unknown_frame_ratio
+    estimate_available = (
+        baseline_pct is not None
+        and baseline_pct > 0
+        and during_pct is not None
+        and (disagreement is None or disagreement <= 0.25)
+    )
 
     return manifest_mod.Quality(
         frame_pointers_ok=report.frame_pointers_ok,
         unknown_frame_ratio=ratio,
-        estimated_overhead_pct=proc.overhead_pct(baseline_pct, during_pct),
+        estimated_overhead_pct=proc.overhead_pct(baseline_pct, during_pct) if estimate_available else None,
         # Emitted together or not at all: the manifest's consistency rule
         # compares the ratio against these two, and a lone total tells nobody
         # anything.

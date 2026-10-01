@@ -121,7 +121,7 @@ class TargetInfo:
 class Quality:
     frame_pointers_ok: bool = True
     unknown_frame_ratio: float = 0.0
-    estimated_overhead_pct: float = 0.0
+    estimated_overhead_pct: Optional[float] = None
     unknown_frame_samples: Optional[int] = None
     total_frame_samples: Optional[int] = None
     overhead: Optional[Dict[str, float]] = None

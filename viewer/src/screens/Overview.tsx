@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import type { Bundle } from "../bundle/load";
 import { runDuration } from "../bundle/load";
-import { qualityFlags } from "../quality";
+import { bundleQualityFlags, formatOverheadPct, usableOverheadPct } from "../quality";
 import { verdict as computeVerdict, type Verdict } from "../analysis";
 import { PmuSummary } from "../components/PmuSummary";
 import {
@@ -17,8 +17,13 @@ import {
 
 export function Overview({ bundle }: { bundle: Bundle }) {
   const manifest = bundle.manifest;
-  const flags = qualityFlags(manifest);
+  const flags = bundleQualityFlags(bundle);
   const quality = manifest.quality;
+  const overheadPct = usableOverheadPct(quality);
+  const untracedCpuPct = Math.max(
+    quality.overhead?.cpu_pct_before ?? -1,
+    quality.overhead?.cpu_pct_after ?? -1,
+  );
   const system = bundle.system;
   const verdict = useMemo(() => computeVerdict(bundle), [bundle]);
 
@@ -83,11 +88,11 @@ export function Overview({ bundle }: { bundle: Bundle }) {
             ) : null}
           </Field>
           <Field label="est. overhead">
-            {quality.estimated_overhead_pct.toFixed(1)}%
-            {quality.overhead?.cpu_pct_during !== undefined && (
+            {formatOverheadPct(quality)}
+            {overheadPct !== null && untracedCpuPct >= 0 && quality.overhead?.cpu_pct_during !== undefined && (
               <span className="text-slate-400">
                 {" "}
-                (target CPU {quality.overhead.cpu_pct_before?.toFixed(0) ?? "?"}% untraced
+                (target CPU {untracedCpuPct.toFixed(0)}% untraced
                 → {quality.overhead.cpu_pct_during.toFixed(0)}% traced)
               </span>
             )}

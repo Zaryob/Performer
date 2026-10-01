@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 MANIFEST = "manifest.json"
 

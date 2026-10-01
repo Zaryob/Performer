@@ -8,7 +8,8 @@
  * they need changing.
  */
 
-import type { Manifest } from "./bundle/types";
+import { readJson, runDuration, type Bundle } from "./bundle/load";
+import { PATHS, type HistogramDoc, type Manifest, type Quality } from "./bundle/types";
 
 export const THRESHOLDS = {
   /** Above this, flame graphs are actively misleading rather than merely poor. */
@@ -30,6 +31,72 @@ export interface Flag {
 const ORDER: Record<FlagLevel, number> = { error: 0, warn: 1, info: 2 };
 
 const percent = (value: number, digits = 0) => `${(value * 100).toFixed(digits)}%`;
+
+/** Preserve valid zeroes while hiding unknown estimates in older bundles. */
+export function usableOverheadPct(quality: Quality): number | null {
+  const value = quality.estimated_overhead_pct;
+  if (value === null) return null;
+  // Earlier collectors wrote 0.0 even alongside a note that the estimate
+  // could not be made or that the untraced baseline was unstable.
+  if ((quality.notes ?? []).some((note) =>
+    note.includes("overhead could not be estimated") ||
+    note.includes("overhead estimate is unreliable"))) return null;
+  return value;
+}
+
+export function formatOverheadPct(quality: Quality): string {
+  const value = usableOverheadPct(quality);
+  return value === null ? "n/a" : `${value.toFixed(1)}%`;
+}
+
+/** Inspect artifacts too: old runqlat probes could mix system-wide tasks. */
+export function bundleQualityFlags(bundle: Bundle): Flag[] {
+  const flags = qualityFlags(bundle.manifest);
+  if (!bundle.files.has(PATHS.runqlat)) return flags;
+  if (bundle.manifest.schema_version === 1) {
+    flags.push({
+      level: "error",
+      code: "runqlat_unreliable",
+      message: "legacy run queue histogram includes system-wide tasks; ignore this histogram",
+      hint: "Recollect with the corrected runqlat probe; aggregated old data cannot be repaired.",
+    });
+    flags.sort((a, b) => ORDER[a.level] - ORDER[b.level]);
+    return flags;
+  }
+
+  try {
+    const histogram = readJson<HistogramDoc>(bundle, PATHS.runqlat);
+    const duration = runDuration(bundle.manifest);
+    const maxPlausibleUs = Math.max(duration * 2, duration + 30) * 1_000_000;
+    if (!histogram || !Array.isArray(histogram.series)) throw new Error("invalid series");
+    const impossible = histogram.series.some((series) => {
+      if (!Array.isArray(series?.buckets)) throw new Error("invalid buckets");
+      return series.buckets.some((bucket) => {
+        if (typeof bucket?.count !== "number" ||
+            (bucket.lo !== null && typeof bucket.lo !== "number")) {
+          throw new Error("invalid bucket");
+        }
+        return bucket.count > 0 && bucket.lo !== null && bucket.lo >= maxPlausibleUs;
+      });
+    });
+    if (impossible) {
+      flags.push({
+        level: "error",
+        code: "runqlat_unreliable",
+        message: "run queue histogram contains waits longer than the collection window; ignore this histogram",
+        hint: "Recollect with the corrected runqlat probe; aggregated old data cannot be repaired.",
+      });
+    }
+  } catch {
+    flags.push({
+      level: "error",
+      code: "runqlat_unreadable",
+      message: "run queue histogram could not be read",
+    });
+  }
+  flags.sort((a, b) => ORDER[a.level] - ORDER[b.level]);
+  return flags;
+}
 
 export function qualityFlags(manifest: Manifest): Flag[] {
   const flags: Flag[] = [];
@@ -69,8 +136,8 @@ export function qualityFlags(manifest: Manifest): Flag[] {
     });
   }
 
-  const overhead = quality.estimated_overhead_pct;
-  if (overhead > THRESHOLDS.overheadPctError) {
+  const overhead = usableOverheadPct(quality);
+  if (overhead !== null && overhead > THRESHOLDS.overheadPctError) {
     flags.push({
       level: "error",
       code: "overhead",
@@ -79,7 +146,7 @@ export function qualityFlags(manifest: Manifest): Flag[] {
       )}% -- the measurement changed the workload`,
       hint: "Use a lighter profile or a shorter duration before drawing conclusions.",
     });
-  } else if (overhead > THRESHOLDS.overheadPctWarn) {
+  } else if (overhead !== null && overhead > THRESHOLDS.overheadPctWarn) {
     flags.push({
       level: "warn",
       code: "overhead",

@@ -8,10 +8,12 @@
  * The 1 Hz /proc series shows the thread count moving; this shows whether
  * that movement is the same threads or new ones, and which code path creates
  * them.
+ * sched_process_fork runs in the creating thread. Its parent_pid is that
+ * thread's TID; bpftrace's pid is the shared TGID used by the exit filter.
  */
 
 tracepoint:sched:sched_process_fork
-/ args->parent_pid == $1 /
+/ pid == $1 /
 {
     @fork_cnt[args->parent_comm] = count();
     @_born_at[args->child_pid] = nsecs;

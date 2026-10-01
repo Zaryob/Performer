@@ -18,10 +18,27 @@
     "tool_versions",
     "quality"
   ],
+  "oneOf": [
+    {
+      "properties": {
+        "schema_version": { "const": 1 },
+        "quality": {
+          "properties": {
+            "estimated_overhead_pct": { "type": "number" }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "schema_version": { "const": 2 }
+      }
+    }
+  ],
   "properties": {
     "schema_version": {
       "description": "Bundle format version. Bumped on any breaking change; viewers must refuse unknown majors.",
-      "const": 1
+      "enum": [1, 2]
     },
     "run_id": {
       "description": "Unique run identifier: <UTC compact timestamp>-<label>. Also the name of the run directory inside the archive.",
@@ -185,8 +202,8 @@
           "maximum": 1
         },
         "estimated_overhead_pct": {
-          "description": "Rough target CPU overhead attributed to the measurement, from utime+stime sampled before and after the run.",
-          "type": "number",
+          "description": "Rough target CPU overhead attributed to the measurement. Null when CPU samples are unavailable or the untraced baseline is unstable.",
+          "type": ["number", "null"],
           "minimum": 0
         },
         "unknown_frame_samples": { "type": "integer", "minimum": 0 },

@@ -70,6 +70,21 @@ class ShippedProfileTests(unittest.TestCase):
                         f"{spec.program} has a BEGIN or END block",
                     )
 
+    def test_threadlife_fork_and_exit_use_the_same_process_filter(self):
+        """A worker's parent_pid is its TID, so it cannot filter all forks."""
+        import re
+
+        spec = profiles.load("light").probe("threadlife")
+        source = profiles.program_path(spec).read_text(encoding="utf-8")
+        for event in ("fork", "exit"):
+            with self.subTest(event=event):
+                predicate = re.search(
+                    rf"tracepoint:sched:sched_process_{event}\s*/([^/]+)/",
+                    source,
+                )
+                self.assertIsNotNone(predicate)
+                self.assertEqual(predicate.group(1).strip(), "pid == $1")
+
     def test_oncpu_is_required_everywhere(self):
         for profile in profiles.load_all():
             self.assertTrue(profile.probe("oncpu").required, profile.name)

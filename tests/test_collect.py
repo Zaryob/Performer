@@ -59,6 +59,7 @@ class CollectTests(unittest.TestCase):
 
         self.assertIsNotNone(result.archive)
         self.assertEqual(result.manifest["status"], "ok")
+        self.assertIsNone(result.manifest["quality"]["estimated_overhead_pct"])
         with Bundle.open(result.archive) as bundle:
             report = bundle.validate(verify_hashes=True)
             self.assertTrue(report.ok, report.flat())
@@ -560,7 +561,11 @@ class CliCollectTests(unittest.TestCase):
             self.assertEqual(code, 0)
             document = json.loads(out)
             self.assertTrue(document["schema_valid"])
-            self.assertEqual(document["flags"], [])
+            self.assertTrue(any(
+                flag["code"] == "quality_note"
+                and "overhead could not be estimated" in flag["message"]
+                for flag in document["flags"]
+            ))
             self.assertEqual(document["target"]["comm"], "contention")
 
     def test_preflight_command(self):

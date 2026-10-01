@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "kind", "mode", "source", "scope", "status", "window_s", "threads_measured", "events", "totals", "threads", "warnings"],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "enum": [1, 2] },
     "kind": { "const": "pmu" },
     "mode": { "const": "basic" },
     "source": { "const": "perf_event_open" },

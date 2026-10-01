@@ -8,30 +8,97 @@
  * "the application is blocking on itself". High run queue latency with low
  * CPU utilisation means something other than CPU is the constraint.
  *
- * The wakeup side cannot be filtered by pid: sched_wakeup fires in the
- * context of the *waker*, which is frequently another process or a kernel
- * thread. The filtering happens on the switch side, where the woken thread
- * is the one running.
+ * The wakeup side cannot use the built-in pid: sched_wakeup fires in the
+ * context of the *waker*. sched_switch runs in the outgoing task's context,
+ * so its built-in pid cannot identify next_pid either. Track the target's
+ * TIDs from task creation and outgoing switch events, then accept only those
+ * TIDs on wakeup and incoming switch. An already sleeping thread's first wakeup can
+ * be missed until it has switched out once; this is preferable to silently
+ * mixing system-wide run queue times into a process profile.
  */
+
+tracepoint:task:task_newtask
+/ pid == $1 && (args->clone_flags & 0x10000) != 0 /
+{
+    // CLONE_THREAD is 0x10000. Exclude separately forked child processes.
+    if (@_exiting_tid[args->pid]) {
+        delete(@_exiting_tid[args->pid]);
+    }
+    @_target_tid[args->pid] = 1;
+}
 
 tracepoint:sched:sched_wakeup,
 tracepoint:sched:sched_wakeup_new
+/ args->pid != 0 && (args->pid == (int32)$1 || @_target_tid[args->pid]) /
 {
     @_queued_at[args->pid] = nsecs;
 }
 
 tracepoint:sched:sched_switch
 {
-    if (@_queued_at[args->next_pid]) {
-        $wait_us = (nsecs - @_queued_at[args->next_pid]) / 1000;
-        @runq_us = hist($wait_us);
-        @runq_by_thread[args->next_comm] = stats($wait_us);
+    if (args->next_pid != 0 &&
+        (args->next_pid == (int32)$1 || @_target_tid[args->next_pid]) &&
+        @_queued_at[args->next_pid]) {
+        // A later timestamp can only come from a collision or a clock
+        // anomaly. Do not turn a negative interval into a huge histogram bin.
+        if (nsecs >= @_queued_at[args->next_pid]) {
+            $wait_us = (nsecs - @_queued_at[args->next_pid]) / 1000;
+            @runq_us = hist($wait_us);
+            // comm can be shared by many TIDs, so this is a name aggregate.
+            @runq_by_comm[args->next_comm] = stats($wait_us);
+        }
         delete(@_queued_at[args->next_pid]);
     }
 
-    // A thread preempted while still runnable goes straight back on the queue.
-    if (args->prev_state == 0) {
-        @_queued_at[args->prev_pid] = nsecs;
+    // Here pid is the outgoing task's TGID. This learns target TIDs that
+    // existed before the probe attached.
+    if (args->prev_pid != 0) {
+        if (@_exiting_tid[args->prev_pid]) {
+            // A task can switch out more than once after process_exit.
+            // Keep the tombstone until process_free so it is never relearned.
+            if (@_target_tid[args->prev_pid]) {
+                delete(@_target_tid[args->prev_pid]);
+            }
+            if (@_queued_at[args->prev_pid]) {
+                delete(@_queued_at[args->prev_pid]);
+            }
+        } else if (pid == $1) {
+            @_target_tid[args->prev_pid] = 1;
+            // A preempted runnable thread goes straight back on the queue.
+            if (args->prev_state == 0) {
+                @_queued_at[args->prev_pid] = nsecs;
+            }
+        } else if (@_target_tid[args->prev_pid]) {
+            delete(@_target_tid[args->prev_pid]);
+            if (@_queued_at[args->prev_pid]) {
+                delete(@_queued_at[args->prev_pid]);
+            }
+        }
+    }
+}
+
+tracepoint:sched:sched_process_exit
+/ pid == $1 /
+{
+    @_exiting_tid[tid] = 1;
+    if (@_target_tid[tid]) {
+        delete(@_target_tid[tid]);
+    }
+    if (@_queued_at[tid]) {
+        delete(@_queued_at[tid]);
+    }
+}
+
+tracepoint:sched:sched_process_free
+/ @_exiting_tid[args->pid] /
+{
+    // The task can no longer run; pid reuse is safe after this point.
+    delete(@_exiting_tid[args->pid]);
+    if (@_target_tid[args->pid]) {
+        delete(@_target_tid[args->pid]);
+    }
+    if (@_queued_at[args->pid]) {
+        delete(@_queued_at[args->pid]);
     }
 }
 

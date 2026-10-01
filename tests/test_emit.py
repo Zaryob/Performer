@@ -88,14 +88,14 @@ class OffCpuTests(EmitterTestCase):
 
 
 class RunqlatTests(EmitterTestCase):
-    def test_histogram_and_per_thread_stats_share_one_document(self):
+    def test_histogram_and_per_comm_stats_share_one_document(self):
         result = self.run_emitter("runqlat")
         self.assertEqual(result.outputs, [layout.HIST_RUNQLAT])
         self.assert_matches_schema(layout.HIST_RUNQLAT, "hist.schema.json")
         document = self.read(layout.HIST_RUNQLAT)
         keys = [s["key"] for s in document["series"]]
         self.assertIn("", keys)  # the global histogram
-        self.assertIn("worker", keys)  # per thread stats
+        self.assertIn("worker", keys)  # aggregate for all TIDs named worker
         stats = next(s for s in document["series"] if s["key"] == "worker")["stats"]
         self.assertEqual(stats["count"], 1347)
 
@@ -103,6 +103,31 @@ class RunqlatTests(EmitterTestCase):
         result = self.run_emitter("runqlat", "Attaching 2 probes...\n\n")
         self.assertEqual(result.outputs, [])
         self.assertTrue(any("no run queue" in w for w in result.warnings))
+
+    def test_legacy_comm_map_name_is_still_readable(self):
+        result = self.run_emitter(
+            "runqlat",
+            "@runq_us:\n[1]  1 |@|\n"
+            "@runq_by_thread[worker]: count 1, average 1, total 1\n",
+        )
+        self.assertEqual(result.outputs, [layout.HIST_RUNQLAT])
+        keys = [s["key"] for s in self.read(layout.HIST_RUNQLAT)["series"]]
+        self.assertIn("worker", keys)
+
+    def test_impossible_wait_discards_polluted_stats(self):
+        # A 20-second probe cannot observe a 2G-microsecond wait. A historical
+        # system-wide runqlat probe could produce this bin from idle TID 0 on
+        # multiple CPUs; its per-comm stats were contaminated too.
+        output = (
+            "@runq_us:\n"
+            "[1, 2)  5 |@|\n"
+            "[2G, 4G)  1 |@|\n"
+            "@runq_by_comm[swapper/0]: count 1, average 2147483648, total 2147483648\n"
+        )
+        result = self.run_emitter("runqlat", output)
+        self.assertEqual(result.outputs, [])
+        self.assertTrue(any("discarded" in w for w in result.warnings))
+        self.assertFalse((self.builder.root / layout.HIST_RUNQLAT).exists())
 
 
 class FutexTests(EmitterTestCase):

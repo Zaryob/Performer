@@ -11,6 +11,7 @@ import { inflate } from "pako";
 import { untar, TarError } from "./untar";
 import {
   SUPPORTED_SCHEMA_VERSION,
+  MIN_SUPPORTED_SCHEMA_VERSION,
   type Manifest,
   type SystemDoc,
   type ThreadsDoc,
@@ -80,10 +81,14 @@ export function bundleFromArchive(fileName: string, data: Uint8Array): Bundle {
   // A bundle from a future collector is exactly the case where guessing
   // produces a confident wrong answer, so it is refused rather than
   // half-read.
-  if (manifest.schema_version !== SUPPORTED_SCHEMA_VERSION) {
+  if (
+    !Number.isInteger(manifest.schema_version) ||
+    manifest.schema_version < MIN_SUPPORTED_SCHEMA_VERSION ||
+    manifest.schema_version > SUPPORTED_SCHEMA_VERSION
+  ) {
     throw new BundleError(
       `${fileName} uses bundle format version ${manifest.schema_version}; ` +
-        `this viewer reads version ${SUPPORTED_SCHEMA_VERSION}. Use a matching viewer.`,
+        `this viewer reads versions ${MIN_SUPPORTED_SCHEMA_VERSION}–${SUPPORTED_SCHEMA_VERSION}. Use a matching viewer.`,
     );
   }
 
