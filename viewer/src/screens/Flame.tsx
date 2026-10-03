@@ -15,7 +15,7 @@ import {
   buildTree,
   filterLines,
   parseFolded,
-  threadTotals,
+  threadProfileCoverage,
 } from "../bundle/folded";
 import { STACK_KINDS, type StackKindId } from "../bundle/types";
 import { stacksAreTrustworthy } from "../quality";
@@ -23,7 +23,7 @@ import { FlameGraph } from "../components/FlameGraph";
 import { Empty, Panel } from "../components/ui";
 
 const IDLE_CHOICES = [
-  { label: "show all threads", share: 0 },
+  { label: "all recorded stacks", share: 0 },
   { label: "hide below 0.1%", share: 0.001 },
   { label: "hide below 1%", share: 0.01 },
   { label: "hide below 5%", share: 0.05 },
@@ -38,28 +38,34 @@ export function Flame({ bundle }: { bundle: Bundle }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [hideBelowShare, setHideBelowShare] = useState(0);
   const [inverted, setInverted] = useState(false);
-  // Merged by default: with 315 roots the per thread view is a comb of
-  // one-pixel slivers, and "where does the time go" is the first question
-  // anyone asks. Which thread comes second, and is one click away.
-  const [mergeThreads, setMergeThreads] = useState(true);
+  const [mergeThreads, setMergeThreads] = useState(false);
 
-  const kind = available.find((entry) => entry.id === kindId) ?? available[0];
+  const kind = available.find((entry) => entry.id === kindId) ?? available[0] ?? STACK_KINDS[0];
   const deferredFilter = useDeferredValue(threadFilter);
   const deferredSearch = useDeferredValue(searchTerm);
 
   const parsed = useMemo(() => {
-    if (!kind) return null;
     const text = readText(bundle, kind.path);
-    return text ? parseFolded(text) : null;
+    return parseFolded(text ?? "");
   }, [bundle, kind]);
 
-  const threads = useMemo(
-    () => (parsed ? threadTotals(parsed) : []),
-    [parsed],
+  const coverage = useMemo(
+    () => threadProfileCoverage(parsed, bundle.threads),
+    [parsed, bundle.threads],
+  );
+  const visibleThreads = useMemo(
+    () => {
+      const needle = deferredFilter.trim().toLowerCase();
+      const tidFilter = /^\d+$/.test(needle) ? Number(needle) : null;
+      return coverage.rows.filter((row) => tidFilter !== null ? row.tid === tidFilter
+        : !needle ||
+          `${row.name} ${row.tid === null ? "" : `[tid=${row.tid}]`} ${row.roots.join(" ")}`
+            .toLowerCase().includes(needle));
+    },
+    [coverage, deferredFilter],
   );
 
   const tree = useMemo(() => {
-    if (!parsed) return null;
     const filtered = filterLines(parsed, {
       threadFilter: deferredFilter,
       hideBelowShare,
@@ -67,16 +73,6 @@ export function Flame({ bundle }: { bundle: Bundle }) {
     });
     return { root: buildTree(filtered), filtered };
   }, [parsed, deferredFilter, hideBelowShare, mergeThreads]);
-
-  if (!available.length) {
-    return (
-      <Empty>
-        This run has no stack files. Only profiles that include a stack probe
-        produce them — check the Overview for which probes ran.
-      </Empty>
-    );
-  }
-  if (!parsed || !tree || !kind) return <Empty>Could not read the stacks.</Empty>;
 
   const trustworthy = stacksAreTrustworthy(bundle.manifest);
   const hiddenValue = parsed.total - tree.filtered.total;
@@ -127,7 +123,7 @@ export function Flame({ bundle }: { bundle: Bundle }) {
                 type="button"
                 onClick={() => setKindId(entry.id)}
                 className={`rounded px-3 py-1.5 text-sm ${
-                  entry.id === kindId
+                  entry.id === kind.id
                     ? "bg-sky-600 text-white"
                     : "bg-slate-800 text-slate-300 hover:bg-slate-700"
                 }`}
@@ -138,11 +134,11 @@ export function Flame({ bundle }: { bundle: Bundle }) {
           </div>
 
           <label className="flex flex-col gap-1 text-xs text-slate-400">
-            thread name
+            thread name or TID
             <input
               value={threadFilter}
               onChange={(event) => setThreadFilter(event.target.value)}
-              placeholder="e.g. worker"
+              placeholder="e.g. worker or 123"
               className="w-48 rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm text-slate-100"
             />
           </label>
@@ -158,7 +154,7 @@ export function Flame({ bundle }: { bundle: Bundle }) {
           </label>
 
           <label className="flex flex-col gap-1 text-xs text-slate-400">
-            idle threads
+            minimum stack share
             <select
               value={hideBelowShare}
               onChange={(event) => setHideBelowShare(Number(event.target.value))}
@@ -174,7 +170,12 @@ export function Flame({ bundle }: { bundle: Bundle }) {
         </div>
 
         <p className="mt-3 text-xs text-slate-500">
-          {threads.length.toLocaleString()} threads in this profile
+          {bundle.threads ? `${coverage.inventoryThreads.toLocaleString()} threads in /proc inventory`
+            : "/proc thread inventory unavailable"}
+          {" · "}{coverage.recordedThreads.toLocaleString()} TIDs with recorded stacks
+          {coverage.nameAggregates > 0 && (
+            <> · {coverage.nameAggregates.toLocaleString()} legacy name aggregates</>
+          )}
           {mergeThreads && " · merged into one tree"}
           {hiddenValue > 0 && (
             <>
@@ -190,11 +191,32 @@ export function Flame({ bundle }: { bundle: Bundle }) {
             <> · {parsed.malformed} malformed lines skipped</>
           )}
         </p>
+        {coverage.withoutStacks > 0 && available.length > 0 && (
+          <p className="mt-2 text-xs text-amber-200">
+            {coverage.withoutStacks.toLocaleString()} inventory threads have no {kind.label} stacks
+            captured. On-CPU sampling only sees threads running at a sample; Off-CPU
+            records completed blocked intervals. A thread parked throughout the capture
+            may have no stack. Missing stacks do not establish zero CPU or blocked time;
+            the Threads screen has the /proc counters.
+          </p>
+        )}
+        {coverage.nameAggregates > 0 && (
+          <p className="mt-2 text-xs text-amber-200">
+            These older stacks combine threads with the same name. Their root count
+            is not a thread count, and values cannot be assigned to individual TIDs.
+            Capture again with the updated collector for separate thread roots.
+          </p>
+        )}
       </Panel>
 
       <Panel title={`${kind.label} — ${kind.unit}`}>
-        {tree.filtered.lines.length === 0 ? (
-          <Empty>No stacks match these filters.</Empty>
+        {!available.length ? (
+          <Empty>
+            This run has no stack files. Check the Overview for which probes ran.
+            Thread inventory below remains available without stack measurements.
+          </Empty>
+        ) : tree.filtered.lines.length === 0 ? (
+          <Empty>{parsed.lines.length === 0 ? "This probe recorded no stacks." : "No stacks match these filters."}</Empty>
         ) : (
           <FlameGraph
             root={tree.root}
@@ -205,45 +227,57 @@ export function Flame({ bundle }: { bundle: Bundle }) {
         )}
       </Panel>
 
-      <Panel title="Threads in this profile">
-        <div className="max-h-64 overflow-y-auto">
+      <Panel title="Thread inventory and stack coverage">
+        <p className="mb-2 text-xs text-slate-400">
+          {visibleThreads.length.toLocaleString()} of {coverage.rows.length.toLocaleString()} rows
+          {" · "}All matching threads are listed. A dash means no attributable stack measurement.
+        </p>
+        <div className="max-h-96 overflow-auto">
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-slate-900 text-left text-xs uppercase tracking-wide text-slate-400">
               <tr>
                 <th className="py-1 pr-3">Thread</th>
+                <th className="py-1 pr-3 text-right">TID</th>
                 <th className="py-1 pr-3 text-right">{kind.unit}</th>
                 <th className="py-1 pr-3 text-right">Share</th>
+                <th className="py-1 pr-3">Stack coverage</th>
                 <th className="py-1" />
               </tr>
             </thead>
             <tbody>
-              {threads.slice(0, 200).map((thread) => (
-                <tr key={thread.name} className="border-t border-slate-800">
+              {visibleThreads.map((thread) => (
+                <tr key={thread.key} className="border-t border-slate-800">
                   <td className="py-1 pr-3 font-mono text-slate-200">{thread.name}</td>
+                  <td className="py-1 pr-3 text-right tabular-nums text-slate-400">
+                    {thread.tid ?? "—"}
+                  </td>
                   <td className="py-1 pr-3 text-right tabular-nums text-slate-300">
-                    {thread.value.toLocaleString()}
+                    {thread.value?.toLocaleString() ?? "—"}
                   </td>
                   <td className="py-1 pr-3 text-right tabular-nums text-slate-400">
-                    {(thread.share * 100).toFixed(2)}%
+                    {thread.share === null ? "—" : `${(thread.share * 100).toFixed(2)}%`}
+                  </td>
+                  <td className="py-1 pr-3 text-xs text-slate-400">
+                    {thread.coverage === "none" ? `no ${kind.label} stack captured`
+                      : thread.coverage === "unidentified" ? "TID unavailable in legacy stacks"
+                        : thread.coverage === "recorded" && !thread.inInventory ? "recorded · outside snapshots"
+                          : thread.coverage}
                   </td>
                   <td className="py-1 text-right">
+                    {thread.roots.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => setThreadFilter(thread.name)}
+                      onClick={() => setThreadFilter(thread.tid === null ? thread.name : `[tid=${thread.tid}]`)}
                       className="text-xs text-sky-400 hover:text-sky-300"
                     >
                       focus
                     </button>
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {threads.length > 200 && (
-            <p className="py-2 text-center text-xs text-slate-500">
-              showing the 200 busiest of {threads.length.toLocaleString()} threads
-            </p>
-          )}
         </div>
       </Panel>
     </div>

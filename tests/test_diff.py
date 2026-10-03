@@ -63,6 +63,12 @@ B = folded(
 
 
 class NormalisePathTests(unittest.TestCase):
+    def test_tid_is_removed_from_thread_root_only(self):
+        self.assertEqual(
+            diff_mod.normalise_path("worker [tid=123];run();fn [tid=456]", merge_threads=False),
+            "worker;run();fn [tid=456]",
+        )
+
     def test_offsets_are_stripped_so_a_rebuild_is_not_a_rewrite(self):
         self.assertEqual(
             diff_mod.normalise_path("app+1;run()+0x20;work()+4", merge_threads=False),
@@ -95,6 +101,18 @@ class NormalisePathTests(unittest.TestCase):
 
 
 class DiffStacksTests(unittest.TestCase):
+    def test_restarted_thread_ids_match_legacy_thread_names(self):
+        result = diff_mod.diff_stacks(
+            [("worker [tid=123];run();work()", 40), ("worker [tid=124];run();work()", 60)],
+            [("worker;run();work()", 100)],
+            merge_threads=False, min_share=0,
+        )
+        self.assertEqual(len(result.paths), 1)
+        self.assertEqual(result.paths[0].path, "worker;run();work()")
+        self.assertEqual(result.paths[0].delta, 0)
+        self.assertEqual(result.only_in_a, [])
+        self.assertEqual(result.only_in_b, [])
+
     def setUp(self):
         self.diff = diff_mod.diff_stacks(A, B, merge_threads=False, min_share=0)
         self.by_path = {entry.path: entry for entry in self.diff.paths}

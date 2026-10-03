@@ -264,7 +264,7 @@ Bundles are accepted as either a `.tgz` or an unpacked run directory.
 
 ```console
 $ open viewer/dist/index.html      # or just double click it
-$ docker compose up -d --build     # build and serve the viewer locally
+$ docker compose up -d --build --force-recreate viewer  # serve the current viewer
 ```
 
 `dist/index.html` is one self-contained file — no server, no toolchain, no

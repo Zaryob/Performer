@@ -289,11 +289,15 @@ def clean_frame(frame: str, *, strip_offsets: bool = True) -> str:
 
 @dataclass(frozen=True)
 class OnCpuLayout:
-    """Which key position holds what in ``@cpu[kstack, ustack, comm]``."""
+    """Key positions in ``@cpu[kstack, ustack, comm, tid]``.
+
+    The optional final key is absent in historical three-key stack maps.
+    """
 
     kernel: Optional[int] = 0
     user: Optional[int] = 1
     comm: Optional[int] = 2
+    tid: Optional[int] = 3
 
 
 @dataclass
@@ -324,7 +328,7 @@ def fold_oncpu(
     annotate_kernel: bool = False,
     strip_offsets: bool = True,
 ) -> Tuple[List[Tuple[str, int]], FoldStats]:
-    """Collapse ``@cpu[kstack, ustack, comm]`` into folded lines.
+    """Collapse ``@cpu[kstack, ustack, comm, tid]`` into folded lines.
 
     Frames are emitted root first (bpftrace prints them leaf first), thread
     name at the bottom and kernel frames on top of user frames, which is the
@@ -336,8 +340,22 @@ def fold_oncpu(
     for entry in entries:
         frames: List[str] = []
         comm = _key_at(entry, layout.comm)
-        if isinstance(comm, str) and comm:
-            frames.append(clean_frame(comm, strip_offsets=False))
+        thread_id = _key_at(entry, layout.tid)
+        tid = (
+            int(thread_id)
+            if isinstance(thread_id, str) and thread_id.isdecimal()
+            else 0
+        )
+        has_root = bool(isinstance(comm, str) and comm) or tid > 0
+        if has_root:
+            root = (
+                clean_frame(comm, strip_offsets=False)
+                if isinstance(comm, str) and comm
+                else "[unnamed]"
+            )
+            if tid > 0:
+                root += f" [tid={tid}]"
+            frames.append(root)
 
         user = _key_at(entry, layout.user)
         if isinstance(user, StackKey):
@@ -353,12 +371,12 @@ def fold_oncpu(
                 kernel_frames = [f"{f}_[k]" for f in kernel_frames]
             frames.extend(kernel_frames)
 
-        if len(frames) <= (1 if isinstance(comm, str) and comm else 0):
+        if len(frames) <= (1 if has_root else 0):
             # Neither stack could be walked; keep the sample but say so, or it
             # silently disappears from the totals.
             frames.append(UNKNOWN)
 
-        stack_frames = frames[1:] if isinstance(comm, str) and comm else frames
+        stack_frames = frames[1:] if has_root else frames
         stats.stacks += 1
         stats.total_samples += entry.value
         stats.total_frames += entry.value * len(stack_frames)

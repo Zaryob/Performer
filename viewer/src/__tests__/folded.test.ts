@@ -8,7 +8,10 @@ import {
   parseFolded,
   search,
   threadTotals,
+  threadIdentity,
+  threadProfileCoverage,
 } from "../bundle/folded";
+import type { ThreadsDoc } from "../bundle/types";
 
 const SAMPLE = [
   "worker1;start_thread;run();lock() 100",
@@ -55,6 +58,72 @@ describe("threadTotals", () => {
   });
 });
 
+describe("thread identity and coverage", () => {
+  const inventory: ThreadsDoc = {
+    schema_version: 2,
+    threads: Object.fromEntries(Array.from({ length: 125 }, (_, index) => [
+      String(index + 100), { name: "worker" },
+    ])),
+  };
+
+  it("separates same-name threads and preserves the full thread inventory", () => {
+    const parsed = parseFolded(Array.from({ length: 10 }, (_, index) =>
+      `worker [tid=${index + 100}];run 3`,
+    ).join("\n"));
+    const coverage = threadProfileCoverage(parsed, inventory);
+    expect(coverage.rows).toHaveLength(125);
+    expect(coverage.inventoryThreads).toBe(125);
+    expect(coverage.recordedThreads).toBe(10);
+    expect(coverage.recordedInventoryThreads).toBe(10);
+    expect(coverage.withoutStacks).toBe(115);
+    expect(coverage.rows.find((row) => row.tid === 224)).toMatchObject({
+      coverage: "none", value: null, share: null, roots: [],
+    });
+    expect(buildTree(parsed).children).toHaveLength(10);
+    expect(parsed.total).toBe(30);
+  });
+
+  it("does not assign legacy comm aggregates to every matching TID", () => {
+    const coverage = threadProfileCoverage(parseFolded("worker;run 300"), inventory);
+    expect(coverage.nameAggregates).toBe(1);
+    expect(coverage.recordedThreads).toBe(0);
+    expect(coverage.unidentifiedThreads).toBe(125);
+    expect(coverage.withoutStacks).toBe(0);
+    expect(coverage.rows.filter((row) => row.inInventory)
+      .every((row) => row.value === null)).toBe(true);
+    expect(coverage.rows.find((row) => row.tid === null)).toMatchObject({
+      value: 300, coverage: "name aggregate",
+    });
+  });
+
+  it("combines renamed roots of one TID and keeps threads outside snapshots", () => {
+    const coverage = threadProfileCoverage(parseFolded([
+      "before [tid=100];run 3", "after [tid=100];run 7",
+      "short-lived [tid=999];run 5",
+    ].join("\n")), inventory);
+    expect(coverage.recordedThreads).toBe(2);
+    expect(coverage.rows.find((row) => row.tid === 100)).toMatchObject({
+      value: 10, share: 10 / 15, inInventory: true,
+    });
+    expect(coverage.rows.find((row) => row.tid === 999)).toMatchObject({
+      value: 5, inInventory: false, coverage: "recorded",
+    });
+  });
+
+  it("reads only valid trailing TID markers", () => {
+    expect(threadIdentity("worker [tid=123]")).toEqual({ name: "worker", tid: 123 });
+    expect(threadIdentity("worker [tid=0]").tid).toBeNull();
+    expect(threadIdentity("worker [tid=12] extra").tid).toBeNull();
+    expect(threadIdentity("worker").tid).toBeNull();
+  });
+
+  it("does not call zero-value folded lines sampled threads", () => {
+    const coverage = threadProfileCoverage(parseFolded("worker [tid=100];run 0"), inventory);
+    expect(coverage.recordedThreads).toBe(0);
+    expect(coverage.rows.find((row) => row.tid === 100)?.value).toBeNull();
+  });
+});
+
 describe("filterLines", () => {
   it("filters by thread name, case insensitively", () => {
     const filtered = filterLines(parseFolded(SAMPLE), { threadFilter: "WORKER1" });
@@ -85,6 +154,25 @@ describe("filterLines", () => {
       threadFilter: "worker2",
     });
     expect(merged.total).toBe(200);
+  });
+
+  it("focuses a numeric TID exactly, including when thread names change", () => {
+    const parsed = parseFolded([
+      "worker [tid=123];run 4", "renamed [tid=123];run 3",
+      "worker [tid=1234];run 100", "worker123;run 200",
+    ].join("\n"));
+    expect(filterLines(parsed, { threadFilter: "123" }).total).toBe(7);
+    expect(filterLines(parsed, { threadFilter: "[tid=123]", mergeThreads: true }).total).toBe(7);
+  });
+
+  it("applies the share threshold per TID even when the thread changes name", () => {
+    const parsed = parseFolded([
+      "before [tid=123];run 1", "after [tid=123];run 1",
+      "busy [tid=456];run 98",
+    ].join("\n"));
+    const filtered = filterLines(parsed, { hideBelowShare: 0.015 });
+    expect(filtered.total).toBe(100);
+    expect(filtered.lines).toHaveLength(3);
   });
 
   it("returns the input untouched when nothing is asked of it", () => {

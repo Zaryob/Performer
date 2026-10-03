@@ -20,7 +20,8 @@
 profile:hz:99
 / pid == $1 /
 {
-    @cpu[kstack, ustack, comm] = count();
+    // comm is a display name, not an identity: many worker threads share it.
+    @cpu[kstack, ustack, comm, tid] = count();
 }
 
 interval:s:$2

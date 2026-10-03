@@ -194,7 +194,7 @@ FlameGraph "folded" format, one stack per line, root first, `;` separated,
 value last:
 
 ```
-app;start_thread;WorkerThread::run();TimerWheel::arm();__lll_lock_wait 4820103
+app [tid=123];start_thread;WorkerThread::run();TimerWheel::arm();__lll_lock_wait 4820103
 ```
 
 * `oncpu.folded` — sample counts from `profile:hz:99`
@@ -205,6 +205,21 @@ app;start_thread;WorkerThread::run();TimerWheel::arm();__lll_lock_wait 4820103
 Frame ordering, which every reader depends on: **thread name first, then the
 user stack root-to-leaf, then the kernel stack on top.** bpftrace prints stacks
 leaf-first, so the collector reverses them.
+
+Current on-CPU and off-CPU probes preserve the TID in the root label as
+`name [tid=123]`. Names alone are not identities: many threads may share the
+same `comm`, which is limited to 15 visible bytes on Linux. Earlier captures
+have name-only roots; their aggregate values cannot be assigned back to
+individual TIDs. The viewer lists those aggregates separately from the
+`/proc` thread inventory. Cross-run diffs group roots by name because TIDs
+change between runs.
+
+An on-CPU stack requires a thread to be running when a sample occurs. Off-CPU
+stacks currently require a switch-out and a subsequent switch-in observed by
+the probe, with the interval passing the configured minimum duration. A
+thread asleep before attachment or still asleep at shutdown can have no
+off-CPU stack; the inventory remains visible and missing stacks are not
+reported as zero measured time.
 
 Normalisation applied when folding (`parse/stacks.py`):
 

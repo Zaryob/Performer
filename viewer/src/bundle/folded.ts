@@ -5,11 +5,13 @@
  *
  *     app;start_thread;WorkerThread::run();EventQueue::pop() 842
  *
- * The collector puts the thread name in the first frame, which is what makes
+ * The collector puts the thread name and TID in the first frame, which makes
  * the thread filter on the Flame screen possible at all -- and that filter is
  * not a nicety. A pool of 315 threads, most of them parked, produces a graph
  * where the idle wait dwarfs everything anyone wants to see.
  */
+
+import type { ThreadsDoc } from "./types";
 
 export interface FoldedLine {
   frames: string[];
@@ -86,6 +88,134 @@ export function threadTotals(result: ParseResult): ThreadTotal[] {
   return out;
 }
 
+export interface ThreadProfileRow {
+  key: string;
+  name: string;
+  tid: number | null;
+  /** Null means there is no measurement attributable to this thread. */
+  value: number | null;
+  share: number | null;
+  roots: string[];
+  inInventory: boolean;
+  coverage: "recorded" | "none" | "unidentified" | "name aggregate";
+}
+
+export interface ThreadProfileCoverage {
+  rows: ThreadProfileRow[];
+  inventoryThreads: number;
+  recordedThreads: number;
+  recordedInventoryThreads: number;
+  withoutStacks: number;
+  unidentifiedThreads: number;
+  nameAggregates: number;
+}
+
+/** New bundles preserve TID; an old name-only root is not a thread identity. */
+export function threadIdentity(root: string): { name: string; tid: number | null } {
+  const match = /^(.*) \[tid=(\d+)\]$/.exec(root);
+  if (match) {
+    const tid = Number(match[2]);
+    if (Number.isSafeInteger(tid) && tid > 0) {
+      return { name: match[1] ?? "", tid };
+    }
+  }
+  return { name: root, tid: null };
+}
+
+/**
+ * Compare recorded stacks with /proc inventory without inventing samples for
+ * parked threads. A legacy root can contain many threads with the same name,
+ * so it stays a separate aggregate and cannot establish per-TID coverage.
+ */
+export function threadProfileCoverage(
+  result: ParseResult,
+  inventory: ThreadsDoc | null,
+): ThreadProfileCoverage {
+  const identified = new Map<number, ThreadProfileRow>();
+  const aggregates: ThreadProfileRow[] = [];
+  for (const total of threadTotals(result)) {
+    if (total.value <= 0) continue;
+    const identity = threadIdentity(total.name);
+    if (identity.tid === null) {
+      aggregates.push({
+        key: `name:${total.name}`,
+        name: identity.name,
+        tid: null,
+        value: total.value,
+        share: total.share,
+        roots: [total.name],
+        inInventory: false,
+        coverage: "name aggregate",
+      });
+      continue;
+    }
+    const previous = identified.get(identity.tid);
+    if (previous) {
+      previous.value = (previous.value ?? 0) + total.value;
+      previous.share = result.total > 0 ? previous.value / result.total : 0;
+      previous.roots.push(total.name);
+    } else {
+      identified.set(identity.tid, {
+        key: `tid:${identity.tid}`,
+        name: identity.name,
+        tid: identity.tid,
+        value: total.value,
+        share: total.share,
+        roots: [total.name],
+        inInventory: false,
+        coverage: "recorded",
+      });
+    }
+  }
+
+  let recordedInventoryThreads = 0;
+  let withoutStacks = 0;
+  let unidentifiedThreads = 0;
+  const inventoryRows: ThreadProfileRow[] = [];
+  for (const [tidText, entry] of Object.entries(inventory?.threads ?? {})) {
+    const tid = Number(tidText);
+    if (!Number.isSafeInteger(tid) || tid <= 0) continue;
+    const recorded = identified.get(tid);
+    if (recorded) {
+      recorded.inInventory = true;
+      inventoryRows.push(recorded);
+      recordedInventoryThreads += 1;
+    } else {
+      // With name-only stacks, an unlisted TID may be inside an aggregate.
+      const unidentified = aggregates.length > 0;
+      if (unidentified) unidentifiedThreads += 1;
+      else withoutStacks += 1;
+      inventoryRows.push({
+        key: `tid:${tid}`,
+        name: entry.name,
+        tid,
+        value: null,
+        share: null,
+        roots: [],
+        inInventory: true,
+        coverage: unidentified ? "unidentified" : "none",
+      });
+    }
+  }
+
+  const extraRows = [...identified.values()].filter((row) => !row.inInventory);
+  const rows = [...inventoryRows, ...extraRows, ...aggregates];
+  rows.sort((a, b) =>
+    (b.value ?? -1) - (a.value ?? -1) ||
+    (a.tid ?? Number.MAX_SAFE_INTEGER) - (b.tid ?? Number.MAX_SAFE_INTEGER) ||
+    a.name.localeCompare(b.name),
+  );
+  return {
+    rows,
+    inventoryThreads: inventoryRows.length,
+    recordedThreads: identified.size,
+    recordedInventoryThreads,
+    withoutStacks,
+    unidentifiedThreads,
+    nameAggregates: aggregates.length,
+  };
+}
+
 // -- filtering --------------------------------------------------------------
 
 export interface FilterOptions {
@@ -114,14 +244,24 @@ export function filterLines(
   options: FilterOptions,
 ): ParseResult {
   const needle = (options.threadFilter ?? "").trim().toLowerCase();
+  const tidFilter = /^\d+$/.test(needle) ? Number(needle) : null;
   const minShare = options.hideBelowShare ?? 0;
   const merge = options.mergeThreads ?? false;
   if (!needle && minShare <= 0 && !merge) return result;
 
   const keepThread = new Set<string>();
+  const identityKey = (root: string) => {
+    const { tid } = threadIdentity(root);
+    return tid === null ? `name:${root}` : `tid:${tid}`;
+  };
   if (minShare > 0) {
+    const totals = new Map<string, number>();
     for (const thread of threadTotals(result)) {
-      if (thread.share >= minShare) keepThread.add(thread.name);
+      const key = identityKey(thread.name);
+      totals.set(key, (totals.get(key) ?? 0) + thread.value);
+    }
+    for (const [key, value] of totals) {
+      if (result.total > 0 && value / result.total >= minShare) keepThread.add(key);
     }
   }
 
@@ -131,8 +271,9 @@ export function filterLines(
     // Matched against the original root, so the thread filter keeps working
     // after the thread frame has been merged away.
     const root = line.frames[0] ?? "";
-    if (needle && !root.toLowerCase().includes(needle)) continue;
-    if (minShare > 0 && !keepThread.has(root)) continue;
+    if (tidFilter !== null ? threadIdentity(root).tid !== tidFilter
+      : needle && !root.toLowerCase().includes(needle)) continue;
+    if (minShare > 0 && !keepThread.has(identityKey(root))) continue;
     if (merge && line.frames.length > 1) {
       lines.push({ frames: line.frames.slice(1), value: line.value });
     } else {

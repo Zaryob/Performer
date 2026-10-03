@@ -33,6 +33,29 @@ const B = parseFolded(
   ].join("\n"),
 );
 
+describe("thread identities across captures", () => {
+  it("compares TID roots by thread name when preserving thread groups", () => {
+    const before = parseFolded("worker [tid=123];run();work() 40\nworker [tid=124];run();work() 60");
+    const after = parseFolded("worker;run();work() 100");
+    const result = diffFolded(before, after, { mergeThreads: false });
+    expect(result.paths).toHaveLength(1);
+    expect(result.paths[0]?.path).toBe("worker;run();work()");
+    expect(result.paths[0]?.delta).toBe(0);
+    expect(result.onlyInA).toEqual([]);
+    expect(result.onlyInB).toEqual([]);
+  });
+
+  it("retains a TID-like suffix on a function frame", () => {
+    const result = diffFolded(
+      parseFolded("worker [tid=123];fn [tid=456] 1"),
+      parseFolded("worker [tid=789];fn [tid=456] 1"),
+      { mergeThreads: false },
+    );
+    expect(result.paths[0]?.path).toBe("worker;fn [tid=456]");
+    expect(result.paths[0]?.delta).toBe(0);
+  });
+});
+
 describe("normaliseFrame", () => {
   it("strips symbol offsets so two builds join on the same path", () => {
     expect(normaliseFrame("_int_malloc+0x1f4")).toBe("_int_malloc");

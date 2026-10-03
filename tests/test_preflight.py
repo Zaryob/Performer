@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from performer import preflight, profiles
@@ -352,6 +353,35 @@ class BpftraceEnvTests(unittest.TestCase):
     def test_user_symbols_are_cached(self):
         """Uncached, a large ustack dump outlasts the SIGINT timeout."""
         self.assertEqual(preflight.bpftrace_env()["BPFTRACE_CACHE_USER_SYMBOLS"], "1")
+
+
+class TrialParsingTests(unittest.TestCase):
+    def test_tid_key_is_compatible_with_frame_pointer_trial(self):
+        output = (
+            "Attaching 2 probes...\n\n"
+            "@cpu[\n    kernel+2\n,\n    work+4\n, worker, 42]: 3\n"
+            "@cpu[\n    kernel+2\n,\n    work+4\n, worker, 43]: 2\n"
+        )
+        with mock.patch("performer.preflight.ProbeProcess") as process_type:
+            probe = process_type.return_value
+            probe.started = True
+            probe.wait_for_attach.return_value = True
+            probe.stop.return_value = SimpleNamespace(reason="sigint", exit_code=0)
+            probe.read_stdout.return_value = output
+            probe.read_stderr.return_value = ""
+            probe.warnings = []
+            with tempfile.TemporaryDirectory() as tmp:
+                trial = preflight.run_trial(
+                    profiles.ONCPU, 42, seconds=0, workdir=tmp, sleep=lambda _: None
+                )
+        self.assertTrue(trial.produced_data)
+        self.assertEqual(trial.warnings, [])
+        self.assertEqual(trial.folded, [
+            ("worker [tid=42];work;kernel", 3),
+            ("worker [tid=43];work;kernel", 2),
+        ])
+        self.assertEqual(trial.stats.total_samples, 5)
+        self.assertEqual(trial.stats.total_frames, 10)
 
 
 if __name__ == "__main__":

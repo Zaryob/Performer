@@ -37,7 +37,8 @@ tracepoint:sched:sched_switch
         if ($blocked_us >= $3) {
             @offcpu_us[@_off_kstack[args->next_pid],
                        @_off_ustack[args->next_pid],
-                       args->next_comm] = sum($blocked_us);
+                       args->next_comm,
+                       args->next_pid] = sum($blocked_us);
             @offcpu_hist = hist($blocked_us);
             @offcpu_by_state[@_off_state[args->next_pid]] = sum($blocked_us);
         }

@@ -70,7 +70,7 @@ docker-viewer-image:
 	docker compose build viewer
 
 docker-viewer: docker-viewer-image
-	docker compose up -d --no-build viewer
+	docker compose up -d --no-build --force-recreate viewer
 	@echo "Viewer: http://127.0.0.1:$${PERFORMER_VIEWER_PORT:-8080}/"
 
 docker-viewer-down:
