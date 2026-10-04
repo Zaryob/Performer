@@ -401,6 +401,7 @@ def run_trial(
     seconds: float = TRIAL_S,
     attach_grace_s: Optional[float] = None,
     workdir: Optional[Path] = None,
+    oncpu_hz: int = profiles.DEFAULT_ONCPU_HZ,
     sleep: Callable[[float], None] = time.sleep,
 ) -> TrialResult:
     """Run one probe briefly and return what it produced.
@@ -412,11 +413,18 @@ def run_trial(
     temporary = workdir is None
     directory = Path(workdir or tempfile.mkdtemp(prefix="performer-preflight-"))
     directory.mkdir(parents=True, exist_ok=True)
-    program = profiles.program_path(spec)
     watchdog = max(1, int(seconds) + 2)
+    try:
+        argv = profiles.probe_command(
+            spec, pid, watchdog, bpftrace=bpftrace,
+            oncpu_hz=oncpu_hz, generated_dir=directory,
+        )
+    except Exception:
+        _cleanup(directory, temporary)
+        raise
     probe = ProbeProcess(
         name=spec.name,
-        argv=[bpftrace, str(program), *spec.probe_args(pid, watchdog)],
+        argv=argv,
         stdout_path=directory / f"{spec.name}.trial.out",
         stderr_path=directory / f"{spec.name}.trial.err",
         env=bpftrace_env(),
@@ -424,7 +432,9 @@ def run_trial(
     grace = attach_grace_s if attach_grace_s is not None else ATTACH_GRACE_S
     probe.start()
     if not probe.started or not probe.wait_for_attach(grace, sleep=sleep):
-        info = probe.exit_info
+        # A readiness timeout can leave a compiling process alive. Always
+        # settle it before removing its logs or starting another trial.
+        info = probe.stop(sigint_timeout=10.0, sigterm_timeout=3.0)
         result = TrialResult(
             ran=False,
             stdout=probe.read_stdout(),
@@ -659,8 +669,10 @@ def run_preflight(
     trial_seconds: float = TRIAL_S,
     attach_grace_s: Optional[float] = None,
     bpftrace: Optional[str] = None,
+    oncpu_hz: int = profiles.DEFAULT_ONCPU_HZ,
 ) -> PreflightReport:
     """Run every check, in order, and stop early only when nothing else can run."""
+    profiles.validate_oncpu_hz(oncpu_hz)
     report = PreflightReport()
 
     bpftrace_check = report.add(check_bpftrace(report, binary=bpftrace))
@@ -686,6 +698,12 @@ def run_preflight(
     cpus = cpu_count or len(_os.sched_getaffinity(0)) or 1
     report.add(check_nofile(report.thread_count, cpus))
     report.add(check_perf_event_paranoid())
+    if oncpu_hz > profiles.DEFAULT_ONCPU_HZ:
+        report.add(Check(
+            "oncpu_frequency", WARN,
+            f"on-CPU sampling at {oncpu_hz} Hz may increase measurement overhead",
+            hint="Compare the measured overhead and probe loss before trusting this run.",
+        ))
 
     if skip_trials:
         reason = "trials skipped"
@@ -699,9 +717,10 @@ def run_preflight(
             "sleep": sleep,
             "seconds": trial_seconds,
             "attach_grace_s": attach_grace_s,
+            "oncpu_hz": oncpu_hz,
         }
         oncpu_trial = run_trial(
-            profiles.ONCPU,
+            profile.probe("oncpu") or profiles.ONCPU,
             pid,
             bpftrace=report.bpftrace_path or "bpftrace",
             **trial_kwargs,

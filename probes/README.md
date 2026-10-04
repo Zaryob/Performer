@@ -20,8 +20,9 @@ seconds, and any further `$N` are thresholds supplied by the profile.
 
 * **Prefer tracepoints over kprobes.** They survive kernel upgrades; a kprobe
   on an inlined or renamed function does not.
-* **Sample at 99 Hz, not 100.** A target full of timers can lock onto a round
-  sampling frequency and produce a systematically wrong profile.
+* **Default to 99 Hz.** A target full of timers can lock onto a round
+  sampling frequency. `--oncpu-hz` can set 1–4000 for both trial and capture;
+  the collector records the chosen rate and warns about higher overhead.
 * **`sched_switch` records the stack when a thread goes off-CPU** and closes
   the interval when it comes back. This is correct because a sleeping thread
   cannot change its own stack.
@@ -35,6 +36,11 @@ seconds, and any further `$N` are thresholds supplied by the profile.
   costs in post-processing.
 * **Every probe carries an `interval:s:$2` watchdog**, so a collector that
   dies does not leave the target traced forever.
+* **Confirm readiness from an executing eBPF timer.** The first 100 ms tick
+  prints `PERFORMER_READY`. The collector uses line-buffered output and waits
+  for this marker; a live process or an `Attaching` banner can precede actual
+  attachment by several seconds. No marker within 60 seconds is a startup
+  failure, and the process is stopped.
 * **Every probe's stderr goes to `raw/<probe>.stderr.log`.** Never
   `2>/dev/null`: it is the only place an attach failure or a lost event count
   is reported.
@@ -47,7 +53,10 @@ seconds, and any further `$N` are thresholds supplied by the profile.
   exits without printing any maps.
 * **Prefix scratch maps with `_`.** Per-thread bookkeeping maps (`@_off_start`,
   `@_queued_at`, ...) are still printed on exit, because clearing them would
-  need an `END` block. The parsers drop every map whose name starts with `_`.
+  need an `END` block. General parsers drop every map whose name starts with `_`.
+  The off-CPU pending-wait parser separately joins saved stacks and timestamps
+  by TID, up to the last tracing checkpoint. Readiness markers and their scratch
+  map never count as sampled data.
 
 ## Costs
 

@@ -144,6 +144,7 @@ class CoexistenceTests(unittest.TestCase):
         from performer.parse import count_map_entries
 
         self.assertEqual(count_map_entries("@_born_at[12]: 881\n@_born_at[13]: 882\n"), 0)
+        self.assertEqual(count_map_entries("PERFORMER_READY\n@_performer_ready: 1\n"), 0)
 
     def test_every_probe_output_parses_cleanly(self):
         """The fixtures are what the emitters are fed in production."""
@@ -192,6 +193,48 @@ class SyscallTableTests(unittest.TestCase):
             self.assertEqual(table.name(115), "clock_nanosleep")
         else:
             self.skipTest(f"no known syscall table for {machine}")
+
+    def test_foreign_headers_do_not_override_native_syscall_numbers(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        filler = "\n".join(f"#define __NR_extra_{n} {1000 + n}" for n in range(60))
+        headers = {
+            "/usr/include/x86_64-linux-gnu/asm/unistd_64.h":
+                filler + "\n#define __NR_read 0\n#define __NR_futex 202\n",
+            "/usr/include/asm-generic/unistd.h":
+                filler + "\n#define __NR_read 63\n#define __NR_futex 98\n",
+        }
+
+        def read_header(path, **kwargs):
+            if str(path) not in headers:
+                raise FileNotFoundError(str(path))
+            return headers[str(path)]
+
+        for machine, read_nr, futex_nr in (("aarch64", 63, 98), ("x86_64", 0, 202)):
+            with self.subTest(machine=machine), patch(
+                "performer.parse.syscalls.os.uname", return_value=SimpleNamespace(machine=machine)
+            ), patch("performer.parse.syscalls.Path.read_text", read_header):
+                syscalls.reset_cache()
+                table = syscalls.load()
+                self.assertEqual(table.name(read_nr), "read")
+                self.assertEqual(table.name(futex_nr), "futex")
+
+    def test_x86_does_not_fall_back_to_foreign_generic_headers(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        def read_header(path, **kwargs):
+            if str(path) == "/usr/include/asm-generic/unistd.h":
+                return "\n".join(f"#define __NR_extra_{n} {n}" for n in range(60))
+            raise FileNotFoundError(str(path))
+
+        with patch("performer.parse.syscalls.os.uname", return_value=SimpleNamespace(machine="x86_64")), patch(
+            "performer.parse.syscalls.Path.read_text", read_header
+        ):
+            table = syscalls.load()
+        self.assertEqual(table.source, "built-in x86_64 table")
+        self.assertEqual(table.name(0), "read")
 
     def test_unknown_numbers_are_named_honestly(self):
         table = syscalls.load()

@@ -143,6 +143,21 @@ $ performer collect --pid 205852 --until-exit --label full-run   # until the tar
 $ performer preflight --pid 205852                               # just the checks
 ```
 
+The on-CPU probe samples at 99 Hz by default. For a sparse stack graph, use
+the same higher rate in preflight and collection:
+
+```console
+$ performer preflight --pid 205852 --oncpu-hz 999
+$ performer collect --pid 205852 --duration 30 --label detailed --oncpu-hz 999
+```
+
+`--oncpu-hz` accepts 1–4000. The chosen rate is recorded as
+`probes[oncpu].thresholds.sample_hz`; a rate above 99 Hz produces an overhead
+warning. The profile timer samples each CPU while a target thread is running,
+so increasing the rate improves the chance of seeing short CPU bursts but does
+not guarantee a sample for every thread. Compare runs at the same rate and
+check the measured overhead and lost-event warnings before drawing conclusions.
+
 ### Ubuntu packages
 
 GitHub Actions and GitLab CI run collector and viewer tests on every branch except
@@ -289,13 +304,20 @@ file, served by `performer daemon`, with a **New measurement** button that the
 | **Wakeups** | who wakes whom, as a graph, because a thread that wakes three hundred others is invisible in every other view |
 | **Diff** | what changed between two runs: a differential flame graph, the biggest movers, and the call paths that appeared or vanished |
 
-Two decisions the 315-thread case forced. The graph is drawn on a **canvas**,
-not as SVG: tens of thousands of DOM rects take seconds to lay out and stutter
-on every interaction afterwards. And the **thread frame is merged away by
-default** — with 315 roots, a call path taken by every thread is drawn 315
-times and none of the slivers is wide enough to read. Merging answers "where
-does the time go"; the thread filter answers "which thread" once there is a
-reason to ask.
+The graph uses a **canvas** to handle large profiles. Thread roots are kept
+separate by default, with TIDs preserved even when every thread has the same
+name. The optional **merge threads** control combines shared call paths.
+The graph distinguishes TIDs with data, drawable roots, and roots wide enough
+for labels: a tiny root does not imply that its thread was lost. The inventory
+table lists every thread and provides **show this thread**, which clears the
+share cutoff and focuses the selected TID. CPU deltas from comparable `/proc`
+snapshots identify threads that ran but received no on-CPU sample.
+
+Off-CPU stacks include completed waits and observed waits still open at the
+last tracing checkpoint. The latter are lower bounds, recorded with a probe
+warning. The wait-duration histogram contains only completed waits. A thread
+already asleep before attachment may have no attributable stack; its inventory
+row remains visible without inventing a measurement.
 
 A run whose stacks could not be resolved gets a banner **on the graph itself**,
 not just a flag elsewhere: a flame graph over `[unknown]` frames looks exactly

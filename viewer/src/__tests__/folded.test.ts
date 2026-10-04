@@ -10,6 +10,8 @@ import {
   threadTotals,
   threadIdentity,
   threadProfileCoverage,
+  threadCpuTimeNs,
+  threadRootVisibility,
 } from "../bundle/folded";
 import type { ThreadsDoc } from "../bundle/types";
 
@@ -121,6 +123,73 @@ describe("thread identity and coverage", () => {
     const coverage = threadProfileCoverage(parseFolded("worker [tid=100];run 0"), inventory);
     expect(coverage.recordedThreads).toBe(0);
     expect(coverage.rows.find((row) => row.tid === 100)?.value).toBeNull();
+  });
+
+  it("flags runtime-positive threads without stacks without treating missing counters as zero", () => {
+    const schedstat = (run_ns: number) => ({ run_ns, wait_ns: 0, timeslices: 0 });
+    const coverage = threadProfileCoverage(parseFolded("worker [tid=100];run 1"), {
+      schema_version: 2,
+      threads: {
+        "100": { name: "sampled", start_schedstat: schedstat(10), end_schedstat: schedstat(20) },
+        "101": { name: "missed", start_schedstat: schedstat(10), end_schedstat: schedstat(1_000_010) },
+        "102": { name: "parked", start_schedstat: schedstat(30), end_schedstat: schedstat(30) },
+        "103": { name: "unknown", end_schedstat: schedstat(1_000_000) },
+      },
+    });
+    expect(coverage.cpuActiveWithoutStacks).toBe(1);
+    expect(coverage.rows.find((row) => row.tid === 101)?.cpuTimeNs).toBe(1_000_000);
+    expect(coverage.rows.find((row) => row.tid === 102)?.cpuTimeNs).toBe(0);
+    expect(coverage.rows.find((row) => row.tid === 103)?.cpuTimeNs).toBeNull();
+  });
+
+  it("does not compare decreasing, missing, or invalid runtime counters", () => {
+    const schedstat = (run_ns: number) => ({ run_ns, wait_ns: 0, timeslices: 0 });
+    expect(threadCpuTimeNs({ name: "x" })).toBeNull();
+    expect(threadCpuTimeNs({ name: "x", start_schedstat: schedstat(10), end_schedstat: schedstat(5) })).toBeNull();
+    expect(threadCpuTimeNs({ name: "x", start_schedstat: schedstat(-1), end_schedstat: schedstat(5) })).toBeNull();
+    expect(threadCpuTimeNs({ name: "x", start_schedstat: schedstat(0), end_schedstat: schedstat(Infinity) })).toBeNull();
+  });
+});
+
+describe("thread root canvas visibility", () => {
+  it("distinguishes 120 data TIDs from the 10 roots wide enough to draw", () => {
+    const parsed = parseFolded(Array.from({ length: 120 }, (_, index) =>
+      `worker [tid=${index + 100}];run ${index < 10 ? 1000 : 1}`,
+    ).join("\n"));
+    const visibility = threadRootVisibility(buildTree(parsed), 1200, 0.4, 26);
+    expect(visibility).toMatchObject({
+      dataTids: 120, drawnTids: 10, labelEligibleTids: 10,
+      subpixelTids: 110, subpixelValue: 110,
+    });
+    expect(visibility.subpixelShare).toBeCloseTo(110 / 10110);
+    expect(parsed.lines).toHaveLength(120);
+  });
+
+  it("counts a renamed TID once and keeps legacy name groups separate", () => {
+    const root = buildTree(parseFolded([
+      "before [tid=100];run 100", "after [tid=100];run 1", "legacy;run 10",
+    ].join("\n")));
+    expect(threadRootVisibility(root, 100, 0.4, 26)).toMatchObject({
+      dataTids: 1, drawnTids: 1, labelEligibleTids: 1,
+      subpixelTids: 0, nameAggregateRoots: 1,
+    });
+  });
+
+  it("distinguishes drawn but unlabeled roots from omitted roots", () => {
+    const root = buildTree(parseFolded(Array.from({ length: 120 }, (_, index) =>
+      `worker [tid=${index + 100}];run 1`,
+    ).join("\n")));
+    expect(threadRootVisibility(root, 1200, 0.4, 26)).toMatchObject({
+      dataTids: 120, drawnTids: 120, labelEligibleTids: 0, subpixelTids: 0,
+    });
+  });
+
+  it("uses the canvas draw and label threshold boundaries exactly", () => {
+    const root = buildTree(parseFolded("worker [tid=100];run 1"));
+    expect(threadRootVisibility(root, 0.4, 0.4, 26).drawnTids).toBe(1);
+    expect(threadRootVisibility(root, 0.39, 0.4, 26).subpixelTids).toBe(1);
+    expect(threadRootVisibility(root, 26, 0.4, 26).labelEligibleTids).toBe(0);
+    expect(threadRootVisibility(root, 26.1, 0.4, 26).labelEligibleTids).toBe(1);
   });
 });
 

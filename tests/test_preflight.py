@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -167,6 +168,15 @@ class FullPreflightTests(unittest.TestCase):
                 "smoke:oncpu",
             ],
         )
+
+    def test_high_oncpu_frequency_warns_but_remains_usable(self):
+        with spawn_target(threads=4, seconds=30) as target, fake_bpftrace("normal"):
+            report = preflight.run_preflight(
+                target.pid, PROFILE, oncpu_hz=999, **FAST
+            )
+        self.assertTrue(report.ok)
+        self.assertEqual(report.get("oncpu_frequency").status, preflight.WARN)
+        self.assertIn("999 Hz", preflight.render(report))
 
     def test_unresolved_stacks_fail_the_frame_pointer_check(self):
         """The check the whole project's credibility rests on."""
@@ -356,6 +366,36 @@ class BpftraceEnvTests(unittest.TestCase):
 
 
 class TrialParsingTests(unittest.TestCase):
+    def test_trial_cleans_up_a_probe_that_never_proves_activation(self):
+        with fake_bpftrace("no_ready"):
+            trial = preflight.run_trial(
+                profiles.ONCPU, os.getpid(), seconds=0, attach_grace_s=0.15,
+            )
+        self.assertFalse(trial.ran)
+        self.assertEqual(trial.exit_reason, "startup_error")
+        self.assertTrue(any("without PERFORMER_READY" in warning for warning in trial.warnings))
+
+    def test_trial_runs_the_selected_oncpu_frequency(self):
+        with mock.patch("performer.preflight.ProbeProcess") as process_type:
+            probe = process_type.return_value
+            probe.started = True
+            probe.wait_for_attach.return_value = True
+            probe.stop.return_value = SimpleNamespace(reason="sigint", exit_code=0)
+            probe.read_stdout.return_value = "Attaching 2 probes...\n\n"
+            probe.read_stderr.return_value = ""
+            probe.warnings = []
+            with tempfile.TemporaryDirectory() as tmp:
+                preflight.run_trial(
+                    profiles.ONCPU, 42, seconds=0, oncpu_hz=999,
+                    workdir=tmp, sleep=lambda _: None,
+                )
+                argv = process_type.call_args.kwargs["argv"]
+                self.assertEqual(Path(argv[-3]).name, "oncpu.bt")
+                self.assertIn(
+                    "profile:hz:999",
+                    Path(argv[-3]).read_text(encoding="utf-8"),
+                )
+
     def test_tid_key_is_compatible_with_frame_pointer_trial(self):
         output = (
             "Attaching 2 probes...\n\n"

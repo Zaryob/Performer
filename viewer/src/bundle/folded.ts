@@ -11,7 +11,7 @@
  * where the idle wait dwarfs everything anyone wants to see.
  */
 
-import type { ThreadsDoc } from "./types";
+import type { ThreadEntry, ThreadsDoc } from "./types";
 
 export interface FoldedLine {
   frames: string[];
@@ -98,6 +98,8 @@ export interface ThreadProfileRow {
   roots: string[];
   inInventory: boolean;
   coverage: "recorded" | "none" | "unidentified" | "name aggregate";
+  /** Comparable /proc start/end runtime delta; not inferred from stacks. */
+  cpuTimeNs: number | null;
 }
 
 export interface ThreadProfileCoverage {
@@ -108,6 +110,15 @@ export interface ThreadProfileCoverage {
   withoutStacks: number;
   unidentifiedThreads: number;
   nameAggregates: number;
+  cpuActiveWithoutStacks: number;
+}
+
+export function threadCpuTimeNs(entry: ThreadEntry): number | null {
+  const start = entry.start_schedstat?.run_ns;
+  const end = entry.end_schedstat?.run_ns;
+  if (typeof start !== "number" || typeof end !== "number" ||
+    !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) return null;
+  return end - start;
 }
 
 /** New bundles preserve TID; an old name-only root is not a thread identity. */
@@ -146,6 +157,7 @@ export function threadProfileCoverage(
         roots: [total.name],
         inInventory: false,
         coverage: "name aggregate",
+        cpuTimeNs: null,
       });
       continue;
     }
@@ -164,6 +176,7 @@ export function threadProfileCoverage(
         roots: [total.name],
         inInventory: false,
         coverage: "recorded",
+        cpuTimeNs: null,
       });
     }
   }
@@ -178,6 +191,7 @@ export function threadProfileCoverage(
     const recorded = identified.get(tid);
     if (recorded) {
       recorded.inInventory = true;
+      recorded.cpuTimeNs = threadCpuTimeNs(entry);
       inventoryRows.push(recorded);
       recordedInventoryThreads += 1;
     } else {
@@ -194,6 +208,7 @@ export function threadProfileCoverage(
         roots: [],
         inInventory: true,
         coverage: unidentified ? "unidentified" : "none",
+        cpuTimeNs: threadCpuTimeNs(entry),
       });
     }
   }
@@ -213,6 +228,56 @@ export function threadProfileCoverage(
     withoutStacks,
     unidentifiedThreads,
     nameAggregates: aggregates.length,
+    cpuActiveWithoutStacks: inventoryRows.filter((row) =>
+      row.coverage === "none" && row.cpuTimeNs !== null && row.cpuTimeNs > 0).length,
+  };
+}
+
+export interface ThreadRootVisibility {
+  dataTids: number;
+  drawnTids: number;
+  labelEligibleTids: number;
+  subpixelTids: number;
+  subpixelValue: number;
+  subpixelShare: number;
+  nameAggregateRoots: number;
+}
+
+/** Root widths use the same thresholds as the canvas drawing pass. */
+export function threadRootVisibility(
+  root: FlameNode,
+  width: number,
+  minDrawWidth: number,
+  labelWidth: number,
+): ThreadRootVisibility {
+  const scale = root.value > 0 && Number.isFinite(width) ? Math.max(0, width) / root.value : 0;
+  const tids = new Map<number, { value: number; drawn: boolean; labelEligible: boolean }>();
+  let nameAggregateRoots = 0;
+  for (const node of root.children) {
+    if (node.value <= 0) continue;
+    const { tid } = threadIdentity(node.name);
+    if (tid === null) {
+      nameAggregateRoots += 1;
+      continue;
+    }
+    const previous = tids.get(tid) ?? { value: 0, drawn: false, labelEligible: false };
+    const pixelWidth = node.value * scale;
+    previous.value += node.value;
+    previous.drawn ||= pixelWidth >= minDrawWidth;
+    previous.labelEligible ||= pixelWidth > labelWidth && previous.drawn;
+    tids.set(tid, previous);
+  }
+  const values = [...tids.values()];
+  const subpixel = values.filter((row) => !row.drawn);
+  const subpixelValue = subpixel.reduce((sum, row) => sum + row.value, 0);
+  return {
+    dataTids: tids.size,
+    drawnTids: values.filter((row) => row.drawn).length,
+    labelEligibleTids: values.filter((row) => row.labelEligible).length,
+    subpixelTids: subpixel.length,
+    subpixelValue,
+    subpixelShare: root.value > 0 ? subpixelValue / root.value : 0,
+    nameAggregateRoots,
   };
 }
 

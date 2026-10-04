@@ -70,4 +70,56 @@ describe("Flame thread coverage", () => {
     expect(html).toContain("121 of 121 rows");
     expect(html).toContain("A dash means no attributable stack measurement");
   });
+
+  it("explains the difference between TIDs in data and narrow roots on canvas", () => {
+    const stacks = Array.from({ length: 120 }, (_, index) =>
+      `worker [tid=${index + 100}];run ${index < 10 ? 1000 : 1}`,
+    ).join("\n");
+    const html = renderToStaticMarkup(<Flame bundle={bundle(stacks)} />);
+    expect(html).toContain("120 TIDs in graph data");
+    expect(html).toContain("10 thread roots drawn at this width");
+    expect(html).toContain("110 TIDs have roots narrower than");
+    expect(html).toContain("1.088% of graph data");
+    expect(html).toContain("show this thread");
+    expect(html.match(/show this thread<\/button>/g)).toHaveLength(120);
+  });
+
+  it("shows independent CPU deltas without assuming the snapshot and tracing windows match", () => {
+    const run = bundle("worker [tid=100];run 3", 3);
+    const schedstat = (run_ns: number) => ({ run_ns, wait_ns: 0, timeslices: 0 });
+    run.threads!.threads["101"]!.start_schedstat = schedstat(100);
+    run.threads!.threads["101"]!.end_schedstat = schedstat(8_000_100);
+    run.threads!.threads["102"]!.start_schedstat = schedstat(100);
+    run.threads!.threads["102"]!.end_schedstat = schedstat(100);
+    const html = renderToStaticMarkup(<Flame bundle={run} />);
+    expect(html).toContain("1 threads accumulated CPU time");
+    expect(html).toContain("snapshot window may extend beyond tracing");
+    expect(html).not.toContain("sampling coverage gap");
+    expect(html).toContain("8.000</td>");
+    expect(html).toContain("0.000</td>");
+    expect(html).toContain("Comparable runtime snapshots unavailable");
+  });
+
+  it("surfaces selected stack probe coverage warnings", () => {
+    const run = bundle("worker [tid=100];run 3", 3);
+    run.manifest.probes = [{ name: "oncpu", status: "partial", thresholds: { sample_hz: 999 }, warnings: ["Sampling covered only part of the collection."] }];
+    const html = renderToStaticMarkup(<Flame bundle={run} />);
+    expect(html).toContain("Sampling covered only part of the collection.");
+    expect(html).toContain("999 Hz per CPU");
+  });
+
+  it("shows incomplete Off-CPU interval warnings with the Off-CPU graph", () => {
+    const run = bundle(null, 3);
+    run.files.set(PATHS.offcpu, new TextEncoder().encode("worker [tid=100];poll 100000"));
+    run.manifest.probes = [{
+      name: "offcpu", status: "ok",
+      warnings: ["Included right-censored off-CPU intervals; full waits are unknown."],
+    }];
+    const html = renderToStaticMarkup(<Flame bundle={run} />);
+    expect(html).toContain("Included right-censored off-CPU intervals; full waits are unknown.");
+    expect(html).toContain("plus observed open waits up to the last tracing checkpoint");
+    expect(html).toContain("The duration histogram includes completed waits only");
+    expect(html).toContain("no Off-CPU stack captured");
+    expect(html).not.toContain("sampling coverage gap");
+  });
 });

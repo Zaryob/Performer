@@ -76,6 +76,10 @@ export function Flame({ bundle }: { bundle: Bundle }) {
 
   const trustworthy = stacksAreTrustworthy(bundle.manifest);
   const hiddenValue = parsed.total - tree.filtered.total;
+  const selectedProbe = bundle.manifest.probes.find((probe) => probe.name === kind.id);
+  const probeWarnings = selectedProbe?.warnings ?? [];
+  const sampleHz = selectedProbe?.thresholds?.sample_hz;
+  const hasObservedOpenWaits = probeWarnings.some((warning) => /right-censored.*off-CPU/i.test(warning));
 
   return (
     <div className="space-y-4">
@@ -173,6 +177,9 @@ export function Flame({ bundle }: { bundle: Bundle }) {
           {bundle.threads ? `${coverage.inventoryThreads.toLocaleString()} threads in /proc inventory`
             : "/proc thread inventory unavailable"}
           {" · "}{coverage.recordedThreads.toLocaleString()} TIDs with recorded stacks
+          {kind.id === "oncpu" && typeof sampleHz === "number" && sampleHz > 0 && (
+            <> · {sampleHz.toLocaleString()} Hz per CPU</>
+          )}
           {coverage.nameAggregates > 0 && (
             <> · {coverage.nameAggregates.toLocaleString()} legacy name aggregates</>
           )}
@@ -195,9 +202,27 @@ export function Flame({ bundle }: { bundle: Bundle }) {
           <p className="mt-2 text-xs text-amber-200">
             {coverage.withoutStacks.toLocaleString()} inventory threads have no {kind.label} stacks
             captured. On-CPU sampling only sees threads running at a sample; Off-CPU
-            records completed blocked intervals. A thread parked throughout the capture
-            may have no stack. Missing stacks do not establish zero CPU or blocked time;
+            attribution requires observing the thread switch out. A thread already
+            parked before attachment may have no attributable stack. Missing stacks
+            do not establish zero CPU or blocked time;
             the Threads screen has the /proc counters.
+          </p>
+        )}
+        {kind.id === "offcpu" && available.length > 0 && (
+          <p className="mt-2 text-xs text-slate-400">
+            Off-CPU stacks include completed waits
+            {hasObservedOpenWaits && ", plus observed open waits up to the last tracing checkpoint"}.
+            The duration histogram includes completed waits only. A stack requires
+            an observed switch-out; waits begun before attachment may have no attributable stack.
+          </p>
+        )}
+        {kind.id === "oncpu" && available.length > 0 && coverage.cpuActiveWithoutStacks > 0 && (
+          <p className="mt-2 text-xs text-amber-200">
+            {coverage.cpuActiveWithoutStacks.toLocaleString()} threads accumulated CPU time
+            between comparable /proc snapshots but have no On-CPU stack sample.
+            In older bundles, the snapshot window may extend beyond tracing.
+            Short bursts can also fall between samples. CPU deltas are listed below;
+            a longer capture or higher sample frequency can help.
           </p>
         )}
         {coverage.nameAggregates > 0 && (
@@ -206,6 +231,11 @@ export function Flame({ bundle }: { bundle: Bundle }) {
             is not a thread count, and values cannot be assigned to individual TIDs.
             Capture again with the updated collector for separate thread roots.
           </p>
+        )}
+        {probeWarnings.length > 0 && (
+          <ul className="mt-2 list-inside list-disc text-xs text-amber-200">
+            {probeWarnings.map((warning, index) => <li key={`${index}:${warning}`}>{warning}</li>)}
+          </ul>
         )}
       </Panel>
 
@@ -223,6 +253,7 @@ export function Flame({ bundle }: { bundle: Bundle }) {
             unit={kind.unit}
             searchTerm={deferredSearch}
             inverted={inverted}
+            threadRoots={!mergeThreads}
           />
         )}
       </Panel>
@@ -231,6 +262,7 @@ export function Flame({ bundle }: { bundle: Bundle }) {
         <p className="mb-2 text-xs text-slate-400">
           {visibleThreads.length.toLocaleString()} of {coverage.rows.length.toLocaleString()} rows
           {" · "}All matching threads are listed. A dash means no attributable stack measurement.
+          {" "}Use “show this thread” to inspect a root too narrow to read in the full graph.
         </p>
         <div className="max-h-96 overflow-auto">
           <table className="w-full text-sm">
@@ -240,6 +272,7 @@ export function Flame({ bundle }: { bundle: Bundle }) {
                 <th className="py-1 pr-3 text-right">TID</th>
                 <th className="py-1 pr-3 text-right">{kind.unit}</th>
                 <th className="py-1 pr-3 text-right">Share</th>
+                <th className="py-1 pr-3 text-right" title="/proc run_ns difference between comparable start and end snapshots, independent of stack samples">/proc CPU ms</th>
                 <th className="py-1 pr-3">Stack coverage</th>
                 <th className="py-1" />
               </tr>
@@ -257,6 +290,11 @@ export function Flame({ bundle }: { bundle: Bundle }) {
                   <td className="py-1 pr-3 text-right tabular-nums text-slate-400">
                     {thread.share === null ? "—" : `${(thread.share * 100).toFixed(2)}%`}
                   </td>
+                  <td className="py-1 pr-3 text-right tabular-nums text-slate-400"
+                    title={thread.cpuTimeNs === null ? "Comparable runtime snapshots unavailable" : `${thread.cpuTimeNs.toLocaleString()} ns of measured CPU time`}>
+                    {thread.cpuTimeNs === null ? "—" : thread.cpuTimeNs > 0 && thread.cpuTimeNs < 1_000
+                      ? "<0.001" : (thread.cpuTimeNs / 1e6).toFixed(3)}
+                  </td>
                   <td className="py-1 pr-3 text-xs text-slate-400">
                     {thread.coverage === "none" ? `no ${kind.label} stack captured`
                       : thread.coverage === "unidentified" ? "TID unavailable in legacy stacks"
@@ -267,10 +305,14 @@ export function Flame({ bundle }: { bundle: Bundle }) {
                     {thread.roots.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => setThreadFilter(thread.tid === null ? thread.name : `[tid=${thread.tid}]`)}
+                      onClick={() => {
+                        setThreadFilter(thread.tid === null ? thread.name : `[tid=${thread.tid}]`);
+                        setHideBelowShare(0);
+                        setMergeThreads(false);
+                      }}
                       className="text-xs text-sky-400 hover:text-sky-300"
                     >
-                      focus
+                      {thread.tid === null ? "show name group" : "show this thread"}
                     </button>
                     )}
                   </td>

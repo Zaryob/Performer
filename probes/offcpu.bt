@@ -8,6 +8,9 @@
  * Gregg's method: the stack is saved when a thread goes off-CPU and the
  * interval is closed when it comes back. This is correct because a sleeping
  * thread cannot change its own stack.
+ * Threads still off-CPU at shutdown retain their observed switch-out stack.
+ * The collector accounts for their right-censored interval up to the last
+ * 100 ms clock checkpoint. It never creates a stack for an unobserved sleep.
  *
  * TASK STATE IS RECORDED, NOT FILTERED. It is tempting to keep only
  * uninterruptible sleep to cut the volume, but a futex wait is
@@ -22,11 +25,15 @@
 tracepoint:sched:sched_switch
 {
     // prev is leaving the CPU: remember when, and how it got here.
-    if (args->prev_pid != 0 && pid == $1) {
+    if (args->prev_pid != 0 && pid == $1 && !@_off_exiting[args->prev_pid]) {
+        if (!@_off_window_start) {
+            @_off_window_start = nsecs;
+        }
         @_off_start[args->prev_pid] = nsecs;
         @_off_ustack[args->prev_pid] = ustack;
         @_off_kstack[args->prev_pid] = kstack;
         @_off_state[args->prev_pid] = args->prev_state;
+        @_off_comm[args->prev_pid] = args->prev_comm;
     }
 
     // next is coming back: close the interval opened above. This runs
@@ -46,7 +53,43 @@ tracepoint:sched:sched_switch
         delete(@_off_ustack[args->next_pid]);
         delete(@_off_kstack[args->next_pid]);
         delete(@_off_state[args->next_pid]);
+        delete(@_off_comm[args->next_pid]);
     }
+}
+
+tracepoint:sched:sched_process_exit
+/ pid == $1 /
+{
+    // Exit can be followed by more than one final context switch. A dead
+    // thread has no open wait to extend to the collection's end.
+    @_off_exiting[tid] = 1;
+    delete(@_off_start[tid]);
+    delete(@_off_ustack[tid]);
+    delete(@_off_kstack[tid]);
+    delete(@_off_state[tid]);
+    delete(@_off_comm[tid]);
+}
+
+tracepoint:sched:sched_process_free
+/ @_off_exiting[args->pid] /
+{
+    delete(@_off_exiting[args->pid]);
+}
+
+// END is unavailable in stripped bpftrace 0.14 builds. A timestamp written
+// while tracing is active bounds the pending intervals safely, even when
+// symbolising and printing the maps takes much longer than the capture.
+interval:ms:100
+{
+    if (!@_performer_ready) {
+        printf("PERFORMER_READY\n");
+        @_performer_ready = 1;
+    }
+    if (!@_off_window_start) {
+        @_off_window_start = nsecs;
+    }
+    @_off_window_end = nsecs;
+    @_off_min_us = $3;
 }
 
 interval:s:$2

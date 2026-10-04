@@ -20,11 +20,13 @@ import {
   frameColour,
   maxDepth,
   search,
+  threadRootVisibility,
   type FlameNode,
 } from "../bundle/folded";
 
 const ROW_HEIGHT = 18;
 const MIN_DRAW_WIDTH = 0.4; // px; narrower frames cannot be seen or clicked
+const MIN_LABEL_WIDTH = 26;
 const FONT = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
 
 export interface FlameGraphProps {
@@ -56,6 +58,8 @@ export interface FlameGraphProps {
    * would be offering a number that means nothing.
    */
   summary?: ReactNode;
+  /** The direct children are thread roots, rather than merged call frames. */
+  threadRoots?: boolean;
 }
 
 interface Hover {
@@ -73,6 +77,7 @@ export function FlameGraph({
   colourFor,
   describe,
   summary,
+  threadRoots = false,
 }: FlameGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -96,6 +101,9 @@ export function FlameGraph({
   const nodes = useMemo(() => flatten(root), [root]);
   const depth = useMemo(() => maxDepth(root), [root]);
   const matches = useMemo(() => search(root, searchTerm), [root, searchTerm]);
+  const threadVisibility = useMemo(() => threadRoots
+    ? threadRootVisibility(root, width, MIN_DRAW_WIDTH, MIN_LABEL_WIDTH) : null,
+  [root, width, threadRoots]);
 
   // Sized to the content rather than to a fixed height: a nine deep profile
   // in a 520px box is mostly empty space, and the graph reads as if something
@@ -143,7 +151,7 @@ export function FlameGraph({
         : frameColour(node.name, highlighted);
       ctx.fillRect(x, y, Math.max(w - 1, 0.5), ROW_HEIGHT - 1);
 
-      if (w > 26) {
+      if (w > MIN_LABEL_WIDTH) {
         const label = fitText(ctx, node.name, w - 6);
         if (label) {
           ctx.fillStyle = "rgba(0,0,0,0.82)";
@@ -214,6 +222,28 @@ export function FlameGraph({
         )}
         {focus === root && <span className="text-slate-500">click a frame to zoom</span>}
       </div>
+
+      {threadVisibility && focus === root && (
+        <div className="text-xs text-slate-400">
+          <p>
+            {threadVisibility.dataTids.toLocaleString()} TIDs in graph data
+            {" · "}{threadVisibility.drawnTids.toLocaleString()} thread roots drawn at this width
+            {" · "}{threadVisibility.labelEligibleTids.toLocaleString()} wide enough for labels
+            {threadVisibility.nameAggregateRoots > 0 && (
+              <> · {threadVisibility.nameAggregateRoots.toLocaleString()} legacy name aggregates</>
+            )}
+          </p>
+          {threadVisibility.subpixelTids > 0 && (
+            <p className="mt-1 text-amber-200">
+              {threadVisibility.subpixelTids.toLocaleString()} TIDs have roots narrower than
+              {" "}{MIN_DRAW_WIDTH} px and cannot be drawn here
+              {" "}({threadVisibility.subpixelValue.toLocaleString()} {unit},
+              {" "}{(threadVisibility.subpixelShare * 100).toFixed(3)}% of graph data).
+              They remain in the data and thread list. Use “show this thread” below to inspect one.
+            </p>
+          )}
+        </div>
+      )}
 
       <div ref={containerRef} className="relative w-full overflow-hidden">
         <canvas

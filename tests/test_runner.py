@@ -9,6 +9,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from performer.runner import (
     ProbeProcess,
@@ -16,6 +17,7 @@ from performer.runner import (
     TargetWatcher,
     scan_stderr,
     stop_all,
+    wait_for_attach_all,
     wait_for_run,
 )
 
@@ -39,12 +41,12 @@ class ProbeProcessTests(unittest.TestCase):
         self.tmp = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
 
-    def _probe(self, mode: str, watchdog: float = 30.0) -> ProbeProcess:
+    def _probe(self, mode: str, watchdog: float = 30.0, name: str = "oncpu") -> ProbeProcess:
         return ProbeProcess(
-            name="oncpu",
+            name=name,
             argv=fake_argv(watchdog),
-            stdout_path=self.tmp / "oncpu.out",
-            stderr_path=self.tmp / "oncpu.err",
+            stdout_path=self.tmp / f"{name}.out",
+            stderr_path=self.tmp / f"{name}.err",
             env={"FAKE_BPFTRACE_MODE": mode},
         )
 
@@ -53,7 +55,7 @@ class ProbeProcessTests(unittest.TestCase):
         probe = self._probe("normal")
         probe.start()
         self.assertTrue(probe.wait_for_attach(1.0))
-        self.assertEqual(probe.read_stdout().strip(), "Attaching 3 probes...")
+        self.assertEqual(probe.read_stdout().strip(), "Attaching 3 probes...\nPERFORMER_READY")
         info = probe.stop()
         self.assertEqual(info.reason, "sigint")
         self.assertEqual(info.exit_code, 0)
@@ -122,6 +124,78 @@ class ProbeProcessTests(unittest.TestCase):
         self.assertFalse(probe.wait_for_attach(2.0))
         self.assertEqual(probe.exit_info.reason, "startup_error")
         self.assertIn("ERROR", probe.read_stderr())
+
+    def test_early_banner_is_not_evidence_of_probe_activation(self):
+        probe = self._probe("normal")
+        probe.env["FAKE_BPFTRACE_READY_DELAY_S"] = "0.3"
+        probe.start()
+        self.addCleanup(probe.stop)
+        self.assertTrue(wait_until(lambda: "Attaching" in probe.read_stdout(), timeout=1.0))
+        self.assertFalse(probe.attached)
+        started = time.monotonic()
+        self.assertTrue(probe.wait_for_attach(1.0))
+        self.assertGreater(time.monotonic() - started, 0.2)
+        self.assertTrue(probe.attached)
+
+    def test_timeout_stops_an_alive_probe_that_never_proves_activation(self):
+        probe = self._probe("no_ready")
+        probe.start()
+        self.addCleanup(probe.stop)
+        self.assertFalse(probe.wait_for_attach(0.15))
+        self.assertFalse(probe.alive)
+        self.assertEqual(probe.exit_info.reason, "startup_error")
+        self.assertTrue(any("without PERFORMER_READY" in warning for warning in probe.warnings))
+
+    def test_all_probes_wait_for_the_last_readiness_tick_and_return_early(self):
+        fast = self._probe("normal", name="oncpu")
+        slow = self._probe("normal", name="offcpu")
+        slow.env["FAKE_BPFTRACE_READY_DELAY_S"] = "0.3"
+        for probe in (fast, slow):
+            probe.start()
+            self.addCleanup(probe.stop)
+        started = time.monotonic()
+        self.assertEqual(wait_for_attach_all([fast, slow], 2.0), {"oncpu": True, "offcpu": True})
+        elapsed = time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 0.3)
+        self.assertLess(elapsed, 1.5)
+
+    def test_a_slow_probe_does_not_turn_a_ready_probe_into_a_failure(self):
+        ready = self._probe("normal", name="oncpu")
+        stuck = self._probe("no_ready", name="offcpu")
+        for probe in (ready, stuck):
+            probe.start()
+            self.addCleanup(probe.stop)
+        self.assertEqual(wait_for_attach_all([ready, stuck], 0.2), {"oncpu": True, "offcpu": False})
+        self.assertTrue(ready.alive)
+        self.assertFalse(stuck.alive)
+
+    def test_all_timed_out_probes_are_signalled_before_any_cleanup_wait(self):
+        events = []
+        probes = []
+        for name in ("oncpu", "offcpu"):
+            probe = mock.Mock(spec=ProbeProcess)
+            probe.name = name
+            probe.started = True
+            probe.attached = False
+            probe.check_startup.return_value = True
+            probe.signal_stop.side_effect = lambda name=name: events.append(("signal", name))
+            probe.abort_startup.side_effect = lambda _, name=name: events.append(("wait", name))
+            probes.append(probe)
+        self.assertEqual(wait_for_attach_all(probes, 0), {"oncpu": False, "offcpu": False})
+        self.assertEqual(events, [
+            ("signal", "oncpu"), ("signal", "offcpu"),
+            ("wait", "oncpu"), ("wait", "offcpu"),
+        ])
+
+    def test_a_ready_probe_that_exits_before_the_barrier_is_not_reported_attached(self):
+        early = self._probe("normal", watchdog=0.15, name="oncpu")
+        slow = self._probe("normal", name="offcpu")
+        slow.env["FAKE_BPFTRACE_READY_DELAY_S"] = "0.35"
+        for probe in (early, slow):
+            probe.start()
+            self.addCleanup(probe.stop)
+        self.assertEqual(wait_for_attach_all([early, slow], 1.0), {"oncpu": False, "offcpu": True})
+        self.assertEqual(early.exit_info.reason, "startup_error")
 
     def test_self_exit_via_watchdog_is_reported_as_exited(self):
         probe = self._probe("normal", watchdog=0.4)

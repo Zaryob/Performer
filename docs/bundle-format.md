@@ -197,7 +197,8 @@ value last:
 app [tid=123];start_thread;WorkerThread::run();TimerWheel::arm();__lll_lock_wait 4820103
 ```
 
-* `oncpu.folded` — sample counts from `profile:hz:99`
+* `oncpu.folded` — sample counts; default `profile:hz:99`, configurable with
+  `--oncpu-hz`, recorded in `probes[oncpu].thresholds.sample_hz`
 * `offcpu.folded` — microseconds blocked
 * `futex.folded` — microseconds in `futex()`
 * `offwake.folded` — optional, blocked stack plus waker stack
@@ -215,11 +216,25 @@ individual TIDs. The viewer lists those aggregates separately from the
 change between runs.
 
 An on-CPU stack requires a thread to be running when a sample occurs. Off-CPU
-stacks currently require a switch-out and a subsequent switch-in observed by
-the probe, with the interval passing the configured minimum duration. A
-thread asleep before attachment or still asleep at shutdown can have no
-off-CPU stack; the inventory remains visible and missing stacks are not
-reported as zero measured time.
+stacks require an observed switch-out and the configured minimum duration.
+Completed waits are closed on switch-in. A thread still waiting at shutdown
+also contributes its captured switch-out stack, bounded by the last 100 ms
+tracing checkpoint. That duration is a lower bound on an unfinished wait;
+the probe warning records the count and observed time. The duration histogram
+contains completed waits only; the folded stacks and state totals also include
+these observed open waits. Exited threads are removed from the pending maps.
+A thread already asleep before attachment can still have no attributable
+stack. The inventory remains visible and missing stacks are not reported as
+zero measured time.
+
+The viewer distinguishes TIDs with stack data from roots wide enough to draw
+or label at the current graph width. Every inventory thread is listed, and
+"show this thread" removes the share cutoff before focusing its graph.
+Comparable start/end `/proc` runtime counters are shown independently of
+stack values. New captures take the snapshots after readiness and before map
+printing. Older snapshots may span a wider window. A positive runtime delta
+with no on-CPU sample is reported explicitly, without assuming that all of
+that runtime occurred inside the probe's window or inventing a stack sample.
 
 Normalisation applied when folding (`parse/stacks.py`):
 
@@ -332,12 +347,19 @@ the target process (`nodes[].external: true`).
 
 ## Probe windows
 
-Every probe in a run covers the same window. They are all started before any
-of them is waited on, and all SIGINTed at the same instant, because otherwise
-the first probe would trace seconds that the last one missed while
-`duration_s` claimed a single window for all of them. `probes[].duration_s`
-records each probe's own lifetime, which includes its startup and its map
-dump and is therefore always a little longer than the run.
+Probes start concurrently. The collector waits for each probe's first eBPF
+timer callback to report `PERFORMER_READY` before starting the collection
+timer and CPU-overhead window. A live bpftrace process or its `Attaching`
+banner alone does not establish that the probe has finished loading.
+An unconfirmed startup times out and is stopped with a recorded error.
+All probes receive SIGINT together at the end of the collection window.
+
+The maps can also contain events between an individual probe attaching and
+the last probe becoming ready. Their windows overlap but are not exactly
+identical. `probes[].duration_s` records each process's lifetime, including
+compilation, attachment, and final map printing; it is not the active tracing
+duration. `manifest.duration_s` records the requested collection window (or
+the observed duration for `--until-exit`).
 
 ## Compatibility
 

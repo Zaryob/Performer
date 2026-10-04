@@ -29,9 +29,11 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from . import proc
 
-#: Time to let a probe attach before deciding it failed at startup.  bpftrace
-#: needs to compile and load the program, which is not instant on a busy box.
-ATTACH_GRACE_S = 2.0
+#: Deadline for the first eBPF readiness tick. Compilation and loading can
+#: take several seconds on a busy machine; process survival is not readiness.
+ATTACH_GRACE_S = 60.0
+READY_MARKER = "PERFORMER_READY"
+_READY_RE = re.compile(r"^PERFORMER_READY\r?$", re.M)
 
 #: bpftrace can take a while to walk and print large maps on SIGINT; with a
 #: 315 thread process the stack maps are big and every user stack has to be
@@ -73,6 +75,7 @@ class ProbeProcess:
     _exit: Optional[ExitInfo] = field(default=None, init=False, repr=False)
     _sigint_sent: bool = field(default=False, init=False, repr=False)
     _sigint_at: float = field(default=0.0, init=False, repr=False)
+    _ready_at: Optional[float] = field(default=None, init=False, repr=False)
 
     # -- lifecycle ------------------------------------------------------
 
@@ -115,6 +118,22 @@ class ProbeProcess:
     def pid(self) -> Optional[int]:
         return self._proc.pid if self._proc is not None else None
 
+    @property
+    def attached(self) -> bool:
+        """An executing eBPF interval, not the early 'Attaching' banner."""
+        if self._ready_at is None and _READY_RE.search(self.read_stdout()):
+            self._ready_at = time.monotonic()
+        return self._ready_at is not None
+
+    def abort_startup(self, timeout_s: float) -> None:
+        """Stop an alive process that never proved its probes were active."""
+        self.warnings.append(
+            f"attachment timed out after {timeout_s:g}s without {READY_MARKER}; "
+            f"see {self.stderr_path.name}"
+        )
+        info = self.stop(sigint_timeout=10.0, sigterm_timeout=3.0)
+        self._exit = ExitInfo("startup_error", info.exit_code, info.duration_s)
+
     def check_startup(self) -> bool:
         """True while the probe is still alive; records the failure if not.
 
@@ -140,7 +159,7 @@ class ProbeProcess:
         return False
 
     def wait_for_attach(self, grace_s: float = ATTACH_GRACE_S, *, sleep=time.sleep) -> bool:
-        """Watch this probe alone through its grace window."""
+        """Wait for this probe's eBPF readiness tick, up to the deadline."""
         return wait_for_attach_all([self], grace_s, sleep=sleep).get(self.name, False)
 
     # -- stopping -------------------------------------------------------
@@ -266,25 +285,50 @@ def wait_for_attach_all(
     *,
     sleep: Callable[[float], None] = time.sleep,
 ) -> Dict[str, bool]:
-    """Watch every probe through one shared grace window.
+    """Wait for every probe's readiness tick within one shared deadline.
 
-    Shared, not one window each: giving each probe its own would delay the
-    start of the measurement by the grace period times the number of probes,
-    and -- worse -- stagger the moments they attach, so the first probe would
-    trace seconds that the last one missed while the manifest claimed a single
-    window for all of them.
+    Startup is concurrent rather than granting another deadline per probe.
+    Faster probes may already be tracing while slower ones load; this barrier
+    ensures every surviving probe is active before the requested run begins.
 
-    Returns probe name -> whether it survived startup.
+    bpftrace prints its 'Attaching' banner before loading finishes. Every
+    shipped probe therefore emits a first-tick marker from an executing
+    interval probe. The measurement can begin only after those ticks arrive.
+    Return early once every probe is ready or has failed; stop timed-out
+    processes so they cannot quietly join the collection later.
     """
-    surviving = {probe.name: probe.started for probe in probes}
+    surviving = {probe.name: False for probe in probes}
+    pending = [probe for probe in probes if probe.started]
     deadline = time.monotonic() + grace_s
-    while time.monotonic() < deadline:
+    while pending:
         for probe in probes:
             if surviving.get(probe.name) and not probe.check_startup():
                 surviving[probe.name] = False
-        if not any(surviving.values()):
+        waiting = []
+        for probe in pending:
+            if not probe.check_startup():
+                continue
+            if probe.attached:
+                surviving[probe.name] = True
+            else:
+                waiting.append(probe)
+        pending = waiting
+        remaining = deadline - time.monotonic()
+        if not pending or remaining <= 0:
             break
-        sleep(0.05)
+        sleep(min(0.05, remaining))
+    # End every timed-out startup together. Some processes need seconds to
+    # settle, and sequential signalling would leave the others collecting
+    # during that cleanup despite having missed the same attach deadline.
+    for probe in pending:
+        probe.signal_stop()
+    for probe in pending:
+        probe.abort_startup(grace_s)
+    # Timeout cleanup or a slow companion's compilation may outlive a ready
+    # probe's watchdog. An old readiness tick is not evidence it is alive now.
+    for probe in probes:
+        if surviving.get(probe.name) and not probe.check_startup():
+            surviving[probe.name] = False
     return surviving
 
 

@@ -31,6 +31,16 @@ tracepoint:raw_syscalls:sys_exit
     delete(@_sc_id[tid]);
 }
 
+// The banner is printed before kernel attachment completes. This event can
+// run only after the probe is active; the collector starts its clock here.
+interval:ms:100
+{
+    if (!@_performer_ready) {
+        printf("PERFORMER_READY\n");
+        @_performer_ready = 1;
+    }
+}
+
 interval:s:$2
 {
     exit();
