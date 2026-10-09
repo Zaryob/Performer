@@ -60,11 +60,12 @@ class CollectOptions:
     annotate_kernel: bool = False
     bpftrace: Optional[str] = None
     pmu: str = "off"
+    oncpu_hz: int = profiles.DEFAULT_ONCPU_HZ
     #: Trial durations used by preflight. Shortened by the test suite; there
     #: is no CLI flag because a shorter trial measures stack quality worse.
     preflight_trial_s: float = preflight_mod.TRIAL_S
     preflight_attach_grace_s: Optional[float] = None
-    #: How long to watch the probes for an early exit before the run starts.
+    #: Deadline for every probe to prove eBPF readiness before the run starts.
     #: Shared across all of them, so it does not scale with the probe count.
     attach_grace_s: Optional[float] = None
 
@@ -84,6 +85,7 @@ def collect(
     printer: Printer = print,
     cancel: Optional[threading.Event] = None,
 ) -> CollectResult:
+    profiles.validate_oncpu_hz(options.oncpu_hz)
     if options.pmu not in ("off", "basic"):
         raise PerformerError(f"unknown PMU mode {options.pmu!r}")
     pmu_session = pmu_mod.Session(options.pid) if options.pmu == "basic" else None
@@ -121,6 +123,7 @@ def _collect(
         overhead_window_s=options.overhead_window_s,
         trial_seconds=options.preflight_trial_s,
         attach_grace_s=options.preflight_attach_grace_s,
+        oncpu_hz=options.oncpu_hz,
     )
     printer(preflight_mod.render(report))
 
@@ -172,7 +175,6 @@ def _collect(
     )
 
     target_static = proc.target_info(options.pid)
-    threads_start = proc.snapshot_threads(options.pid)
 
     watcher = TargetWatcher(options.pid)
     sampler = SeriesSampler(options.pid)
@@ -181,6 +183,8 @@ def _collect(
     interrupted = cancel if cancel is not None else threading.Event()
 
     launched = _launch_probes(builder, profile, report, options, printer)
+    # Runtime deltas should cover collection, not compilation or map printing.
+    threads_start = proc.snapshot_threads(options.pid)
 
     # The CPU reading and the clock have to start at the same instant. Taking
     # the reading before the probes attach would charge the attach time --
@@ -214,6 +218,7 @@ def _collect(
         if pmu_session is not None:
             pmu_session.stop()
         ticks_end = proc.cpu_ticks(options.pid)
+        threads_end = proc.snapshot_threads(options.pid)
 
         # ---- stop everything ----------------------------------------
         printer(f"stopping probes after {elapsed:.1f}s ({outcome.reason})")
@@ -227,7 +232,6 @@ def _collect(
             ),
         )
 
-    threads_end = proc.snapshot_threads(options.pid)
     ended_at = manifest_mod.utc_now()
 
     cpu_after = (
@@ -308,6 +312,11 @@ def _collect(
         warnings.append(
             "collected with --ignore-quality despite a failed frame pointer check; "
             "the stacks in this bundle are not trustworthy"
+        )
+    if options.oncpu_hz > profiles.DEFAULT_ONCPU_HZ:
+        warnings.append(
+            f"on-CPU sampling used {options.oncpu_hz} Hz instead of the default "
+            f"{profiles.DEFAULT_ONCPU_HZ} Hz; a higher rate can increase overhead"
         )
 
     died_at = None
@@ -449,21 +458,26 @@ def _launch_probes(
 ) -> List[tuple]:
     """Start every probe that passed its smoke test."""
     bpftrace = report.bpftrace_path or "bpftrace"
-    watchdog = int((options.duration_s or 0) + 30) if options.duration_s else 86400
-    # Every probe is started before any of them is waited on, so they all
-    # attach at effectively the same moment and the window the manifest
-    # records is the window they all covered.
+    # The first probe can be active while another is still attaching. Leave
+    # the full attach window plus the run duration before its own watchdog.
+    watchdog = (
+        int(options.duration_s + (options.attach_grace_s or ATTACH_GRACE_S) + 30)
+        if options.duration_s else 86400
+    )
+    # Start concurrently, then confirm each probe is executing eBPF before
+    # starting the collection timer. A faster probe can trace while another
+    # is loading, so its maps can include this brief leading interval.
     launched: List[tuple] = []
     for spec in profile.probes:
         if not report.smoke.get(spec.name):
             continue
         probe = ProbeProcess(
             name=spec.name,
-            argv=[
-                bpftrace,
-                str(profiles.program_path(spec)),
-                *spec.probe_args(options.pid, watchdog),
-            ],
+            argv=profiles.probe_command(
+                spec, options.pid, watchdog, bpftrace=bpftrace,
+                oncpu_hz=options.oncpu_hz,
+                generated_dir=builder.root / layout.DIR_RAW,
+            ),
             stdout_path=builder.root / layout.DIR_RAW / f"{spec.name}.stdout.log",
             stderr_path=builder.probe_log_path(spec.name),
             env=preflight_mod.bpftrace_env(),
@@ -483,6 +497,13 @@ def _launch_probes(
                 f"  probe '{spec.name}' failed to start; see raw/{spec.name}.stderr.log"
             )
     return launched
+
+
+def _probe_thresholds(spec: profiles.ProbeSpec, oncpu_hz: int) -> Optional[Dict[str, Any]]:
+    thresholds: Dict[str, Any] = dict(spec.thresholds)
+    if spec.name == "oncpu":
+        thresholds["sample_hz"] = oncpu_hz
+    return thresholds or None
 
 
 def _finish_probes(
@@ -513,7 +534,7 @@ def _finish_probes(
                     warnings=[
                         "disabled by preflight: the smoke test produced no output"
                     ],
-                    thresholds=dict(spec.thresholds) or None,
+                    thresholds=_probe_thresholds(spec, options.oncpu_hz),
                 )
             )
             continue
@@ -565,7 +586,7 @@ def _finish_probes(
                 duration_s=round(info.duration_s, 2),
                 exit_reason=info.reason,
                 exit_code=info.exit_code,
-                thresholds=dict(spec.thresholds) or None,
+                thresholds=_probe_thresholds(spec, options.oncpu_hz),
                 outputs=outputs,
             )
         )

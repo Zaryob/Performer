@@ -9,6 +9,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from performer import profiles
 from performer.errors import PerformerError
@@ -85,9 +86,61 @@ class ShippedProfileTests(unittest.TestCase):
                 self.assertIsNotNone(predicate)
                 self.assertEqual(predicate.group(1).strip(), "pid == $1")
 
+    def test_every_probe_reports_readiness_from_a_running_timer(self):
+        """An attach banner printed by userspace cannot prove BPF is active."""
+        for profile in profiles.load_all():
+            for spec in profile.probes:
+                with self.subTest(profile=profile.name, probe=spec.name):
+                    source = profiles.program_path(spec).read_text(encoding="utf-8")
+                    self.assertIn("interval:ms:100", source)
+                    self.assertIn('printf("PERFORMER_READY\\n")', source)
+                    self.assertIn("if (!@_performer_ready)", source)
+
     def test_oncpu_is_required_everywhere(self):
         for profile in profiles.load_all():
             self.assertTrue(profile.probe("oncpu").required, profile.name)
+
+    def test_oncpu_frequency_uses_the_installed_program_at_99_hz(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            command = profiles.probe_command(
+                profiles.ONCPU, 42, 10, bpftrace="bpftrace",
+                generated_dir=Path(tmp),
+            )
+            self.assertEqual(command[0], "bpftrace")
+            self.assertEqual(command[1:3], ["-B", "line"])
+            self.assertEqual(command[-3:], [
+                str(profiles.program_path(profiles.ONCPU)), "42", "10",
+            ])
+            self.assertFalse((Path(tmp) / "oncpu.bt").exists())
+
+    def test_oncpu_frequency_rewrites_exactly_one_attachpoint(self):
+        original = profiles.program_path(profiles.ONCPU).read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmp:
+            command = profiles.probe_command(
+                profiles.ONCPU, 42, 10, bpftrace="bpftrace", oncpu_hz=999,
+                generated_dir=Path(tmp),
+            )
+            generated = Path(command[-3])
+            self.assertEqual(generated.name, "oncpu.bt")
+            self.assertEqual(command[-2:], ["42", "10"])
+            changed = generated.read_text(encoding="utf-8")
+            self.assertEqual(changed, original.replace("profile:hz:99\n", "profile:hz:999\n", 1))
+        self.assertEqual(profiles.program_path(profiles.ONCPU).read_text(encoding="utf-8"), original)
+
+    def test_oncpu_frequency_rejects_bad_values_and_missing_attachpoint(self):
+        for value in (0, 4001, 99.5, True):
+            with self.subTest(value=value), self.assertRaises(PerformerError):
+                profiles.validate_oncpu_hz(value)
+        with tempfile.TemporaryDirectory() as tmp:
+            program = Path(tmp) / "oncpu.bt"
+            program.write_text("profile:hz:100\n", encoding="utf-8")
+            with mock.patch.object(profiles, "probes_dir", return_value=Path(tmp)):
+                for hz in (99, 999):
+                    with self.subTest(hz=hz), self.assertRaisesRegex(PerformerError, "exactly one"):
+                        profiles.probe_command(
+                            profiles.ONCPU, 42, 10, bpftrace="bpftrace", oncpu_hz=hz,
+                            generated_dir=Path(tmp) / "generated",
+                        )
 
 
 class NameValidationTests(unittest.TestCase):

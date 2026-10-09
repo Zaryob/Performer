@@ -117,6 +117,53 @@ Thread kimliğinin iki koşu arasında değişmesi Diff'e sahte değişim
 eklemez: koşular thread adına göre karşılaştırılır.
 Bu değişiklikler Linux'ta 152 hedefli regresyon testiyle doğrulandı.
 
+## Ölçüm sonunda bekleyen 120 thread kontrolü
+
+`20261001T182953Z-open-wait-120-tids` kaydında 120 worker önce CPU/sleep
+işi yaptı, ardından ölçüm bitene kadar `pipe_read` içinde kaldı. Hedefin
+başlangıç ve bitiş envanteri 121 thread'di. Kayıt 4 Ekim'de güncel parser ile
+yeniden doğrulandı; bu, yeni bir canlı Linux koşusu değildir.
+
+- On-CPU: 120/120 worker, 521 çağrı yolu, 2.611 örnek.
+- Off-CPU: 120/120 worker, 632 çağrı yolu, ana thread ile 121 TID.
+- Tamamlanmış beklemelerde worker `pipe_read` yolu yoktu; açık aralıklar ve
+  son folded dosyası 120/120 worker'ın bu yolunu korudu.
+- 121 açık aralıkta `1.857.580.308 µs`, tamamlanan aralıklarda
+  `601.735.901 µs` vardı. Folded ve task-state toplamlarının ikisi de
+  `2.459.316.209 µs`; çift sayım görülmedi.
+- Açık worker beklemeleri 15,342–15,362 saniyeydi. Son checkpoint'e kadar
+  gözlenen süre yazıldı; beklemelerin tam süresi henüz bilinmiyordu.
+- Süre histogramındaki 30.315 tamamlanmış beklemeye açık aralık eklenmedi.
+- Sürüm 2 şema ve 11 dosyanın SHA-256 kontrolü geçti. Kayıt yalnız olay
+  üretmeyen `futex` nedeniyle `partial`; değişen yük nedeniyle ek yük `n/a`.
+- Hedef normal kapandı; temizleme günlüğünde PID'nin artık bulunmadığı doğrulandı.
+
+Bu test, yalnız kapanan off-CPU aralıklarını yazmanın uzun beklemeleri
+kaybettirdiğini doğruladı. Collector artık gözlenen açık aralıkları da
+koruyor; ölçümden önce uyuyan thread'ler için stack uydurmuyor.
+
+Başlangıçta yalnız iki saniye süreç canlılığına bakmak da yeterli değildi:
+bpftrace o sırada hâlâ derleniyor/yükleniyor olabilir. Her probun çalışan
+eBPF timer'ından `PERFORMER_READY` gelmeden toplama süresi başlamıyor.
+Hazır olmayan problar zaman aşımında birlikte durduruluyor. `/proc` thread
+snapshot'ları da derleme ve map yazma süresini CPU delta'larına katmamak
+için toplama penceresine taşındı.
+
+Viewer tüm envanter satırlarını, veride bulunan TID'leri, çizilebilen kökleri
+ve etikete yetecek genişlikteki kökleri ayrı gösteriyor. Küçük thread'in
+**show this thread** düğmesi paylaşım eşiğini kaldırıp TID'ye odaklanıyor.
+`--oncpu-hz` ile 1–4000 Hz seçilebilir; varsayılan 99 Hz korunur. Daha yüksek
+oran ek yük uyarısıyla kaydedilir ve her thread'in örnekleneceğini garanti etmez.
+
+4 Ekim doğrulamasında Linux makinesi SSH üzerinden erişilemiyordu. Yeni
+canlı kayıt yerine yukarıdaki paket yeniden okundu; güncel Linux regresyonları
+yerel Linux konteynerinde, viewer ise kaynak/SSR testleriyle kontrol edildi.
+Ubuntu 24.04 ARM64 / Python 3.12.3 üzerinde 463 test geçti (1 atlama);
+viewer'ın 128 testi, TypeScript kontrolü ve production build'i geçti. Docker'ın
+sunduğu HTML, yerel build ile aynıydı. Linux testlerinde ayrıca yabancı x86
+syscall başlıklarının ARM64 numaralarını yanlış adlandırabildiği görüldü;
+başlık seçimi native mimariye göre yapılıyor ve iki mimari için regresyon testi var.
+
 ## Viewer'da açma
 
 Güncel `viewer/dist/index.html` dosyasını tarayıcıda açıp **Runs → choose

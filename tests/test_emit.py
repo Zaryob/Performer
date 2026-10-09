@@ -19,6 +19,7 @@ from performer.jsonschema import load_schema
 from performer.parse import syscalls
 
 from .fake_bpftrace import OUTPUT_BY_PROBE
+from .test_parse_offcpu import CHECKPOINT, pending
 
 STARTED = _dt.datetime(2026, 8, 6, 14, 25, 30, tzinfo=_dt.timezone.utc)
 
@@ -76,6 +77,34 @@ class OnCpuTests(EmitterTestCase):
 
 
 class OffCpuTests(EmitterTestCase):
+    def test_open_wait_writes_flame_and_state_but_no_completed_histogram(self):
+        result = self.run_emitter("offcpu", pending() + CHECKPOINT)
+        self.assertEqual(result.outputs, [layout.STACK_OFFCPU, layout.HIST_OFFCPU_BY_STATE])
+        folded = (self.builder.root / layout.STACK_OFFCPU).read_text()
+        self.assertIn("worker [tid=42];wait;", folded)
+        self.assertTrue(folded.endswith(" 4000000\n"))
+        self.assertEqual(self.read(layout.HIST_OFFCPU_BY_STATE)["rows"], [["interruptible", "1", 4_000_000]])
+        self.assertFalse((self.builder.root / layout.HIST_OFFCPU_DURATION).exists())
+        self.assert_matches_schema(layout.HIST_OFFCPU_BY_STATE, "table.schema.json")
+        self.assertTrue(any("right-censored" in warning for warning in result.warnings))
+
+    def test_completed_wait_and_open_tail_are_counted_once(self):
+        completed = (
+            "@offcpu_us[\n    schedule+2\n    kernel_root+4\n,\n"
+            "    std::map<int, int>::find()+4\n    wait+2\n, worker, 42]: 2000000\n"
+            "@offcpu_by_state[1]: 2000000\n"
+            "@offcpu_hist:\n[1M, 2M) 1 |@|\n"
+        )
+        result = self.run_emitter("offcpu", completed + pending() + CHECKPOINT)
+        folded = (self.builder.root / layout.STACK_OFFCPU).read_text().splitlines()
+        self.assertEqual(len(folded), 1)
+        self.assertTrue(folded[0].endswith(" 6000000"))
+        self.assertEqual(result.fold_stats.total_samples, 6_000_000)
+        self.assertEqual(self.read(layout.HIST_OFFCPU_BY_STATE)["rows"][0][2], 6_000_000)
+        histogram = self.read(layout.HIST_OFFCPU_DURATION)
+        self.assertEqual(histogram["series"][0]["total_count"], 1)
+        self.assert_matches_schema(layout.HIST_OFFCPU_DURATION, "hist.schema.json")
+
     def test_same_named_blocked_threads_are_separate_in_bundle(self):
         text = "".join(
             f"@offcpu_us[\n    schedule+2\n,\n    wait+4\n, worker, {tid}]: 10000\n"

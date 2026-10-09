@@ -20,14 +20,19 @@ from typing import Dict, Optional, Tuple
 
 _DEFINE_RE = re.compile(r"^#define\s+__NR_([A-Za-z0-9_]+)\s+(\d+)")
 
-#: Header locations, in order of preference.  The first is the x86_64 table
-#: and the second the architecture independent include.
-_HEADER_CANDIDATES = (
-    "/usr/include/asm/unistd_64.h",
-    "/usr/include/x86_64-linux-gnu/asm/unistd_64.h",
-    "/usr/include/asm-generic/unistd.h",
-    "/usr/include/asm/unistd.h",
-)
+# Cross-compilation packages can install foreign headers on the same host.
+# Only consider headers for the native syscall ABI; asm-generic numbers are
+# not a fallback for x86_64, nor are x86 headers valid on ARM64.
+_HEADER_CANDIDATES = {
+    "x86_64": (
+        "/usr/include/asm/unistd_64.h",
+        "/usr/include/x86_64-linux-gnu/asm/unistd_64.h",
+    ),
+    "aarch64": (
+        "/usr/include/aarch64-linux-gnu/asm/unistd.h",
+        "/usr/include/asm-generic/unistd.h",
+    ),
+}
 
 #: Fallback for x86_64, covering what a threaded application actually calls.
 #: Deliberately not exhaustive: an entry that is not here renders as
@@ -66,7 +71,9 @@ _X86_64: Dict[int, str] = {
 
 
 def _load_from_headers() -> Tuple[Optional[Dict[int, str]], Optional[str]]:
-    for candidate in _HEADER_CANDIDATES:
+    machine = os.uname().machine
+    machine = {"amd64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
+    for candidate in _HEADER_CANDIDATES.get(machine, ()):
         path = Path(candidate)
         try:
             text = path.read_text(encoding="utf-8", errors="replace")

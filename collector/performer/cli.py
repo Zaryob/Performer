@@ -27,6 +27,20 @@ EXIT_FAILURE = 1
 PROG = "performer"
 
 
+def _oncpu_hz(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"--oncpu-hz must be an integer from {profiles.MIN_ONCPU_HZ} "
+            f"to {profiles.MAX_ONCPU_HZ}"
+        ) from exc
+    try:
+        return profiles.validate_oncpu_hz(parsed)
+    except PerformerError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROG,
@@ -48,6 +62,10 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     collect.add_argument("--pid", type=int, required=True, help="target process id")
+    collect.add_argument(
+        "--oncpu-hz", type=_oncpu_hz, default=profiles.DEFAULT_ONCPU_HZ,
+        metavar="HZ", help="on-CPU samples per CPU-second (1-4000; default 99)",
+    )
     duration_group = collect.add_mutually_exclusive_group()
     duration_group.add_argument(
         "--duration", type=float, default=60.0, help="seconds to collect (default 60)"
@@ -108,6 +126,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="run the environment checks against a target without collecting",
     )
     preflight.add_argument("--pid", type=int, required=True)
+    preflight.add_argument(
+        "--oncpu-hz", type=_oncpu_hz, default=profiles.DEFAULT_ONCPU_HZ,
+        metavar="HZ", help="on-CPU trial samples per CPU-second (1-4000; default 99)",
+    )
     preflight.add_argument("--profile", default=profiles.DEFAULT_PROFILE)
     preflight.add_argument("--bpftrace", default=None, help="path to the bpftrace binary to check")
     preflight.add_argument(
@@ -336,6 +358,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
         annotate_kernel=args.annotate_kernel,
         bpftrace=args.bpftrace,
         pmu=args.pmu,
+        oncpu_hz=args.oncpu_hz,
     )
     result = collect(options)
     print()
@@ -352,7 +375,8 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
 
     profile = profiles.load(args.profile)
     report = preflight_mod.run_preflight(
-        args.pid, profile, skip_trials=args.skip_trials, bpftrace=args.bpftrace
+        args.pid, profile, skip_trials=args.skip_trials, bpftrace=args.bpftrace,
+        oncpu_hz=args.oncpu_hz,
     )
     if args.json:
         print(json.dumps(report.to_dict(), indent=2))

@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional
 from . import layout
 from .bundle import BundleBuilder
 from .parse import hist as hist_parse
+from .parse import offcpu as offcpu_parse
 from .parse import stacks as stack_parse
 from .parse import syscalls as syscall_parse
 
@@ -131,14 +132,32 @@ def emit_oncpu(context: EmitContext, text: str) -> EmitResult:
 
 
 def emit_offcpu(context: EmitContext, text: str) -> EmitResult:
-    result = _emit_folded(
-        context,
-        text,
-        map_name="offcpu_us",
-        path=layout.STACK_OFFCPU,
-        label="off-CPU",
-        value_unit="us blocked",
+    result = EmitResult()
+    completed = stack_parse.parse_maps(text)
+    pending = offcpu_parse.parse_pending_offcpu(text)
+    result.warnings.extend(completed.warnings)
+    result.warnings.extend(pending.warnings)
+    folded, stats = stack_parse.fold_oncpu(
+        [*completed.entries("offcpu_us"), *pending.entries],
+        annotate_kernel=context.annotate_kernel,
     )
+    if folded:
+        context.builder.add_folded(layout.STACK_OFFCPU, folded)
+        result.outputs.append(layout.STACK_OFFCPU)
+        result.fold_stats = stats
+        result.notes.append(
+            f"{layout.STACK_OFFCPU}: {len(folded)} stacks, {stats.total_samples:,} us blocked, "
+            f"{stats.unknown_ratio:.1%} unknown frames"
+        )
+    else:
+        result.warnings.append("produced no off-CPU stacks")
+    if pending.entries:
+        result.warnings.append(
+            f"included {len(pending.entries)} right-censored off-CPU intervals "
+            f"({pending.total_us:,} us observed): these threads had not resumed at the "
+            "last 100 ms tracing checkpoint; their full waits are unknown and "
+            "the duration histogram includes completed intervals only"
+        )
     dump = hist_parse.parse_maps(text)
     result.warnings.extend(dump.warnings)
 
@@ -157,9 +176,11 @@ def emit_offcpu(context: EmitContext, text: str) -> EmitResult:
     # Task state is recorded rather than filtered (see offcpu.bt), so the
     # split between interruptible and uninterruptible sleep is data the
     # viewer can filter on rather than a decision made at collection time.
-    by_state = dump.values.get("offcpu_by_state")
+    by_state = dict(dump.values.get("offcpu_by_state", []))
+    for state, value in pending.by_state.items():
+        by_state[state] = by_state.get(state, 0) + value
     if by_state:
-        rows = [[_task_state_name(key), key, value] for key, value in by_state]
+        rows = [[_task_state_name(key), key, value] for key, value in by_state.items()]
         context.builder.add_json(
             layout.HIST_OFFCPU_BY_STATE,
             hist_parse.table_doc(

@@ -49,7 +49,7 @@ def count_map_entries(text: str) -> int:
     The count may double count an entry that both parsers recognise. That is
     fine: the caller compares it against zero.
     """
-    from . import hist, stacks
+    from . import hist, offcpu, stacks
 
     stack_dump = stacks.parse_maps(text)
     hist_dump = hist.parse_maps(text)
@@ -58,4 +58,5 @@ def count_map_entries(text: str) -> int:
         + sum(len(series) for series in hist_dump.histograms.values())
         + sum(len(rows) for rows in hist_dump.values.values())
         + sum(len(rows) for rows in hist_dump.stats.values())
+        + len(offcpu.parse_pending_offcpu(text).entries)
     )

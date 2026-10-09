@@ -4,8 +4,8 @@
 It reproduces the behaviours the collector actually depends on, which are the
 ones that are awkward to get right:
 
-  * it prints ``Attaching N probes...`` and then **nothing** until it is
-    stopped -- the single write moment that makes SIGINT handling critical;
+  * it prints ``Attaching N probes...`` before activation, then an executing
+    probe's ``PERFORMER_READY`` marker; maps are written only on stop;
   * on SIGINT it dumps its maps to stdout and exits 0;
   * the maps it dumps match the probe it was asked to run, in the shapes real
     bpftrace uses: stack maps, histograms, stats and plain value maps;
@@ -23,6 +23,9 @@ ones that are awkward to get right:
     stubborn        ignore SIGINT and SIGTERM, forcing SIGKILL
     lost_events     normal, but report dropped events on stderr
     empty_stacks    normal, but every stack is unresolved
+    no_ready        alive after the banner, but never proves activation
+
+``FAKE_BPFTRACE_READY_DELAY_S`` delays activation after the early banner.
 
 This is a test double, not a simulator: it makes no attempt to be bpftrace.
 """
@@ -260,7 +263,16 @@ def main(argv: list) -> int:
     mode = os.environ.get("FAKE_BPFTRACE_MODE", "normal")
     comm = os.environ.get("FAKE_BPFTRACE_COMM", "target")
 
-    positional = [a for a in argv[1:] if not a.startswith("-")]
+    positional = []
+    skip_option_value = False
+    for argument in argv[1:]:
+        if skip_option_value:
+            skip_option_value = False
+            continue
+        if argument == "-B":
+            skip_option_value = True
+        elif not argument.startswith("-"):
+            positional.append(argument)
     program = os.path.basename(positional[0]) if positional else ""
 
     if mode == "startup_error" or (mode == "oncpu_startup_error" and program == "oncpu.bt"):
@@ -282,6 +294,13 @@ def main(argv: list) -> int:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
     print(f"Attaching {len(positional)} probes...", flush=True)
+
+    ready_delay = max(0.0, float(os.environ.get("FAKE_BPFTRACE_READY_DELAY_S", "0")))
+    ready_at = time.monotonic() + ready_delay
+    while not _stop and time.monotonic() < ready_at:
+        time.sleep(0.01)
+    if not _stop and mode != "no_ready":
+        print("PERFORMER_READY", flush=True)
 
     deadline = time.monotonic() + watchdog
     while not _stop and time.monotonic() < deadline:

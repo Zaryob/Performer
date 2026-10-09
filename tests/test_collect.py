@@ -13,9 +13,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from performer import layout, profiles
-from performer.bundle import Bundle
-from performer.collect import CollectOptions, collect
+from performer import layout, preflight, profiles
+from performer.bundle import Bundle, BundleBuilder
+from performer.collect import CollectOptions, _launch_probes, collect
 from performer.errors import PerformerError, PreflightError
 
 from .support import fake_bpftrace, requires_target, spawn_target
@@ -32,6 +32,26 @@ FAST_PREFLIGHT = {
 
 def quiet(_message: str) -> None:
     """Collection narrates its progress; tests do not need to hear it."""
+
+
+class ProbeLaunchTests(unittest.TestCase):
+    def test_watchdog_includes_the_other_probes_attach_window(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            builder = BundleBuilder(Path(tmp), label="watchdog")
+            profile = profiles.Profile(
+                name="unit", description="one probe", probes=(profiles.ONCPU,),
+                max_duration_s=600, expected_overhead="< 3%",
+            )
+            report = preflight.PreflightReport(smoke={"oncpu": True})
+            options = CollectOptions(
+                pid=42, label="watchdog", out_dir=Path(tmp),
+                duration_s=5, attach_grace_s=60,
+            )
+            with patch("performer.collect.ProbeProcess") as process_type, patch(
+                "performer.collect.wait_for_attach_all", return_value={"oncpu": True}
+            ):
+                _launch_probes(builder, profile, report, options, quiet)
+            self.assertEqual(process_type.call_args.kwargs["argv"][-1], "95")
 
 
 @requires_target
@@ -76,6 +96,48 @@ class CollectTests(unittest.TestCase):
         self.assertEqual(result.manifest["status"], "ok")
         with Bundle.open(result.archive) as bundle:
             self.assertTrue(bundle.validate().ok)
+
+    def test_thread_cpu_deltas_exclude_attach_and_map_printing(self):
+        import performer.collect as collect_module
+
+        runtime = [100]
+        launch = collect_module._launch_probes
+        wait = collect_module.wait_for_run
+        stop = collect_module.stop_all
+
+        def launching(*args, **kwargs):
+            probes = launch(*args, **kwargs)
+            runtime[0] += 10_000_000
+            return probes
+
+        def collecting(*args, **kwargs):
+            outcome = wait(*args, **kwargs)
+            runtime[0] += 2_000_000
+            return outcome
+
+        def printing(*args, **kwargs):
+            stop(*args, **kwargs)
+            runtime[0] += 20_000_000
+
+        def snapshot(pid):
+            return {pid: {
+                "name": "worker", "start_time_ticks": 100,
+                "schedstat": {"run_ns": runtime[0], "wait_ns": 0, "timeslices": 1},
+            }}
+
+        with spawn_target(threads=4, seconds=60) as target, fake_bpftrace("normal"), patch(
+            "performer.collect._launch_probes", side_effect=launching
+        ), patch("performer.collect.wait_for_run", side_effect=collecting), patch(
+            "performer.collect.stop_all", side_effect=printing
+        ), patch("performer.collect.proc.snapshot_threads", side_effect=snapshot):
+            result = collect(self._options(target.pid), printer=quiet)
+
+        with Bundle.open(result.archive) as bundle:
+            thread = json.loads(bundle.read_text(layout.META_THREADS))["threads"][str(target.pid)]
+        self.assertEqual(
+            thread["end_schedstat"]["run_ns"] - thread["start_schedstat"]["run_ns"],
+            2_000_000,
+        )
 
     def test_folded_stacks_are_usable(self):
         with spawn_target(threads=8, seconds=60) as target, fake_bpftrace("normal"):
@@ -122,6 +184,20 @@ class CollectTests(unittest.TestCase):
         self.assertEqual(probe["exit_reason"], "sigint")
         self.assertEqual(probe["outputs"], [layout.STACK_ONCPU])
         self.assertEqual(probe["events_lost"], 0)
+        self.assertEqual(probe["thresholds"], {"sample_hz": 99})
+
+    def test_selected_oncpu_frequency_is_used_and_recorded(self):
+        with spawn_target(threads=8, seconds=60) as target, fake_bpftrace("normal"):
+            result = collect(
+                self._options(target.pid, oncpu_hz=999), printer=quiet
+            )
+        oncpu = next(p for p in result.manifest["probes"] if p["name"] == "oncpu")
+        self.assertEqual(oncpu["thresholds"], {"sample_hz": 999})
+        self.assertTrue(any("999 Hz" in warning for warning in result.manifest["warnings"]))
+        self.assertEqual(result.preflight.get("oncpu_frequency").status, "warn")
+        with Bundle.open(result.archive) as bundle:
+            self.assertTrue(bundle.validate(verify_hashes=True).ok)
+            self.assertIn("profile:hz:999", bundle.read_text("raw/oncpu.bt"))
 
     def test_raw_stdout_is_dropped_unless_requested(self):
         with spawn_target(threads=8, seconds=60) as target, fake_bpftrace("normal"):
@@ -442,7 +518,7 @@ class StandardProfileTests(unittest.TestCase):
         probes = {p["name"]: p for p in result.manifest["probes"]}
         self.assertEqual(probes["offcpu"]["thresholds"], {"min_us": 100.0})
         self.assertEqual(probes["futex"]["thresholds"], {"min_us": 50.0})
-        self.assertNotIn("thresholds", probes["oncpu"])
+        self.assertEqual(probes["oncpu"]["thresholds"], {"sample_hz": 99})
 
     def test_overhead_stays_under_the_profile_budget(self):
         """M2 acceptance: the standard profile costs the target under 15%.

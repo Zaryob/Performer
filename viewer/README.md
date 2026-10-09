@@ -52,7 +52,12 @@ seconds to lay out and stutter afterwards. On-CPU and off-CPU roots preserve
 TIDs, so same-named threads are separate. The graph shows these roots by
 default; merging is an explicit option for combining shared call paths.
 The inventory table lists every thread, including those without attributable
-stacks, and filtering by TID makes a small thread's graph readable.
+stacks. It also shows independent `/proc` CPU deltas and flags CPU activity
+without an on-CPU sample. The graph reports how many TIDs have data, drawable
+roots, and roots wide enough for labels. "Show this thread" focuses by TID and
+clears the share cutoff, making even a small thread's graph readable.
+Off-CPU probe warnings identify observed waits still open at shutdown; these
+are included in stack/state totals but not in the completed-wait histogram.
 
 **Unusable data must not be drawn as if it were fine.** A run whose stacks
 could not be resolved gets a banner on the graph itself, not just a flag on

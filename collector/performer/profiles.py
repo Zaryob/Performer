@@ -14,6 +14,7 @@ fixed directory, never joined with anything a caller supplies.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -22,6 +23,11 @@ from . import layout, yamlish
 from .errors import PerformerError
 
 DEFAULT_PROFILE = "standard"
+DEFAULT_ONCPU_HZ = 99
+MIN_ONCPU_HZ = 1
+MAX_ONCPU_HZ = 4000
+_ONCPU_ATTACHPOINT = re.compile(r"^profile:hz:99[ \t]*$", re.MULTILINE)
+_ANY_PROFILE_ATTACHPOINT = re.compile(r"^[ \t]*profile:hz:[^\n]+$", re.MULTILINE)
 
 #: Keys a profile document may contain.  An unknown key is an error, because
 #: the likeliest cause is a typo in a threshold, and a silently ignored
@@ -114,6 +120,63 @@ def program_path(spec: ProbeSpec) -> Path:
     if not path.is_file():
         raise PerformerError(f"probe program not found: {path}")
     return path
+
+
+def validate_oncpu_hz(value: int) -> int:
+    """Keep the generated bpftrace attachpoint a bounded integer literal."""
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not MIN_ONCPU_HZ <= value <= MAX_ONCPU_HZ
+    ):
+        raise PerformerError(
+            f"--oncpu-hz must be an integer from {MIN_ONCPU_HZ} to {MAX_ONCPU_HZ}"
+        )
+    return value
+
+
+def probe_command(
+    spec: ProbeSpec,
+    pid: int,
+    watchdog_s: int,
+    *,
+    bpftrace: str,
+    oncpu_hz: int = DEFAULT_ONCPU_HZ,
+    generated_dir: Optional[Path] = None,
+) -> List[str]:
+    """Build the same probe command for preflight and actual collection.
+
+    Keep the shipped file untouched at the default rate. At another rate,
+    write a copy with exactly one on-CPU attachpoint changed; this also keeps
+    the positional parameters compatible with older bpftrace releases.
+    """
+    validate_oncpu_hz(oncpu_hz)
+    program = program_path(spec)
+    if spec.name == "oncpu":
+        source = program.read_text(encoding="utf-8")
+        if (
+            len(_ANY_PROFILE_ATTACHPOINT.findall(source)) != 1
+            or len(_ONCPU_ATTACHPOINT.findall(source)) != 1
+        ):
+            raise PerformerError(
+                f"{program}: expected exactly one profile:hz:{DEFAULT_ONCPU_HZ} "
+                "attachpoint to record --oncpu-hz accurately"
+            )
+        if oncpu_hz != DEFAULT_ONCPU_HZ:
+            if generated_dir is None:
+                raise PerformerError("a directory is required for a generated oncpu probe")
+            modified = _ONCPU_ATTACHPOINT.sub(f"profile:hz:{oncpu_hz}", source)
+            destination = Path(generated_dir) / spec.program
+            if destination.resolve() == program.resolve():
+                raise PerformerError(
+                    "generated oncpu probe cannot overwrite the installed program"
+                )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(modified, encoding="utf-8")
+            program = destination
+    # Readiness comes from printf in the first executing eBPF interval. A
+    # file-backed stdout must flush that line before collection can begin.
+    return [bpftrace, "-B", "line", str(program), *spec.probe_args(pid, watchdog_s)]
 
 
 # --------------------------------------------------------------------------

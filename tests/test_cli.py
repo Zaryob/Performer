@@ -136,6 +136,22 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertNotIn("not implemented", help_text)
 
+    def test_oncpu_hz_flags_are_advertised_and_bounded(self):
+        for command in ("collect", "preflight"):
+            with self.subTest(command=command):
+                code, help_text, _ = run_help(command)
+                self.assertEqual(code, 0)
+                self.assertIn("--oncpu-hz HZ", help_text)
+                for value in ("0", "4001", "1.5"):
+                    argv = [command, "--pid", "1", "--oncpu-hz", value]
+                    if command == "collect":
+                        argv.extend(["--label", "test"])
+                    err = io.StringIO()
+                    with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+                        main(argv)
+                    self.assertEqual(raised.exception.code, 2)
+                    self.assertIn("--oncpu-hz must be an integer from 1 to 4000", err.getvalue())
+
     def test_schema_command_lists_the_contract(self):
         code, out, _ = run_cli("schema")
         self.assertEqual(code, 0)
