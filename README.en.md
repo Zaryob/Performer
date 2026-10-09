@@ -1,5 +1,7 @@
 # Performer
 
+Try the [verified synthetic bundle pair](docs/examples/README.md) without Docker or eBPF. [Local validation](docs/VALIDATION.md) distinguishes actual checks from remaining live Linux/eBPF work. Synthetic data is not evidence of measurement accuracy or profiler overhead.
+
 [Türkçe](README.md) · **English**
 
 Performer measures CPU use, waiting, and lock contention in Linux processes.

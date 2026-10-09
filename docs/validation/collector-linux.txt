@@ -1,0 +1,111 @@
+make -C tests/target
+make[1]: Entering directory '/tmp/portfolio-performer/tests/target'
+g++ -O2 -g -fno-omit-frame-pointer -pthread -std=c++17 -Wall -Wextra -o contention contention.cc -pthread
+make[1]: Leaving directory '/tmp/portfolio-performer/tests/target'
+python3 -m compileall -q collector/performer
+python3 -m unittest discover -s tests -t .
+.....................................................................EE...../usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1063 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.........../usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1093 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1096 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1101 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1115 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1113 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1111 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1109 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1107 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1105 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+../usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1120 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1126 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1123 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1129 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1133 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1136 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1142 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1145 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+...../usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1160 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+........../usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1198 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+../usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1203 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1211 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1225 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1239 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..../usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 1251 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+...............................................................................................................................s......................................................................................................................................................................................
+======================================================================
+ERROR: test_overhead_is_not_inflated_by_probe_startup (tests.test_collect.StandardProfileTests.test_overhead_is_not_inflated_by_probe_startup)
+The CPU window and the clock must open at the same instant.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/portfolio-performer/tests/test_collect.py", line 488, in test_overhead_is_not_inflated_by_probe_startup
+    self.assertLess(overhead, 25.0, f"{result.manifest['label']}: {overhead}%")
+  File "/usr/lib/python3.12/unittest/case.py", line 1255, in assertLess
+    if not a < b:
+           ^^^^^
+TypeError: '<' not supported between instances of 'NoneType' and 'float'
+
+======================================================================
+ERROR: test_overhead_stays_under_the_profile_budget (tests.test_collect.StandardProfileTests.test_overhead_stays_under_the_profile_budget)
+M2 acceptance: the standard profile costs the target under 15%.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/portfolio-performer/tests/test_collect.py", line 460, in test_overhead_stays_under_the_profile_budget
+    self.assertLess(overhead, 15.0, f"estimated overhead {overhead}%")
+  File "/usr/lib/python3.12/unittest/case.py", line 1255, in assertLess
+    if not a < b:
+           ^^^^^
+TypeError: '<' not supported between instances of 'NoneType' and 'float'
+
+----------------------------------------------------------------------
+Ran 432 tests in 217.001s
+
+FAILED (errors=2, skipped=1)
+make: *** [Makefile:30: check] Error 1
