@@ -52,6 +52,17 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"performer {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
+    native = sub.add_parser("collect-perf", help="record on-CPU native callchains with perf, optionally using DWARF")
+    native.add_argument("--pid", type=int, required=True)
+    native.add_argument("--label", required=True)
+    native.add_argument("--out", type=Path, default=Path("runs"))
+    native.add_argument("--duration", type=float, default=20)
+    native.add_argument("--oncpu-hz", type=_oncpu_hz, default=99)
+    native.add_argument("--call-graph", choices=("fp", "dwarf"), default="dwarf")
+    native.add_argument("--dwarf-stack-size", type=int, default=8192)
+    native.add_argument("--perf", default=None)
+    native.set_defaults(func=_cmd_collect_perf)
+
     collect = sub.add_parser(
         "collect",
         help="measure a running process and write a run bundle",
@@ -337,6 +348,14 @@ def _build_parser() -> argparse.ArgumentParser:
 # --------------------------------------------------------------------------
 # commands
 # --------------------------------------------------------------------------
+
+
+def _cmd_collect_perf(args: argparse.Namespace) -> int:
+    from .perf_collect import collect_perf
+    archive = collect_perf(pid=args.pid, label=args.label, out_dir=args.out, duration_s=args.duration,
+                           oncpu_hz=args.oncpu_hz, call_graph=args.call_graph, dwarf_stack_size=args.dwarf_stack_size, perf=args.perf)
+    print(f"bundle: {archive}")
+    return EXIT_OK
 
 
 def _cmd_collect(args: argparse.Namespace) -> int:

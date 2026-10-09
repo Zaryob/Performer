@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from . import emit, layout, manifest as manifest_mod, preflight as preflight_mod
-from . import pmu as pmu_mod, proc, profiles, window
+from . import pmu as pmu_mod, proc, profiles, symbols, window
 from . import __version__
 from .bundle import BundleBuilder
 from .errors import PerformerError, PreflightError
@@ -180,6 +180,7 @@ def _collect(
     )
 
     target_static = proc.target_info(options.pid)
+    modules_start = symbols.modules_snapshot(options.pid)
 
     watcher = TargetWatcher(options.pid)
     sampler = SeriesSampler(options.pid)
@@ -297,6 +298,13 @@ def _collect(
         builder, launched, report, profile, options, printer, elapsed
     )
     builder.set_started_at(started_at)
+    builder.add_json("meta/modules.json", {
+        "schema_version": layout.SCHEMA_VERSION,
+        "source": "/proc/pid/maps and ELF GNU build-id",
+        "start": modules_start,
+        "end": symbols.modules_snapshot(options.pid) if proc.is_same_process(options.pid, watcher.start_time_ticks) else [],
+        "offset_unit": "hexadecimal file offsets and virtual addresses; not inferred ELF symbol addresses",
+    })
     builder.add_json(layout.META_WINDOW, {
         "schema_version": layout.SCHEMA_VERSION,
         "clock": "boottime",
@@ -665,6 +673,9 @@ def _finish_probes(
         if gate_start is not None and observed_end is not None:
             observed_duration = max(0.0, (int(observed_end.group(1)) - int(gate_start.group(1))) / 1e9)
         emitted = emit.emit(spec.name, context, stdout)
+        evidence = symbols.stack_evidence(stdout, spec.name)
+        if evidence["records"]:
+            builder.add_json(f"meta/{spec.name}.frames.json", evidence)
         warnings.extend(emitted.warnings)
         outputs.extend(emitted.outputs)
         for note in emitted.notes:

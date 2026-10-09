@@ -516,10 +516,10 @@ def check_frame_pointers(
         return Check(
             "frame_pointers",
             FAIL,
-            f"{ratio:.0%} of sampled frames are [unknown]: the target was built "
-            "without frame pointers, so the stacks are unusable",
+            f"{ratio:.0%} of sampled frames are [unknown]: unwinding or symbol "
+            "resolution is incomplete; stack quality is insufficient",
             hint=(
-                "Rebuild the target with -fno-omit-frame-pointer. "
+                "Install matching debug symbols and check frame pointers (-fno-omit-frame-pointer). "
                 "Pass --ignore-quality to collect anyway."
             ),
             details=details,

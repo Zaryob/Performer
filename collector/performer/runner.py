@@ -66,6 +66,7 @@ class ProbeProcess:
     stdout_path: Path
     stderr_path: Path
     env: Optional[Dict[str, str]] = None
+    pass_fds: Sequence[int] = ()
     warnings: List[str] = field(default_factory=list)
 
     _proc: Optional[subprocess.Popen] = field(default=None, init=False, repr=False)
@@ -96,6 +97,7 @@ class ProbeProcess:
                 start_new_session=True,
                 env=environment,
                 shell=False,
+                pass_fds=tuple(self.pass_fds),
             )
         except OSError as exc:
             self._close_files()

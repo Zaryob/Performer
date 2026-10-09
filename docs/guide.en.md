@@ -626,3 +626,26 @@ literally.
 ## Licence
 
 Apache 2.0 — see [LICENSE](../LICENSE).
+
+
+## Native perf / DWARF capture
+
+```sh
+sudo ./collector/bin/performer collect-perf --pid 1234 --label native-dwarf \
+  --duration 20 --oncpu-hz 99 --call-graph dwarf --out runs
+```
+
+This optional path requires a usable Linux `perf` executable. It records on-CPU
+callchains in the same version 2 bundle, readable by the offline viewer. DWARF
+can unwind binaries that omit frame pointers when they carry suitable unwind
+information. `--call-graph fp` is available for targets built with frame pointers;
+`--dwarf-stack-size` controls saved stack bytes (8192 by default).
+
+This path does not collect off-CPU, locks or PMU counters. Raw `perf.data`, build
+IDs, module mappings and original addresses are retained for later symbol
+resolution with matching binaries/debug symbols. Normal bpftrace collection now
+retains module/build-ID snapshots and original stack text in `meta/*.frames.json`
+too. An unresolved frame does not prove that frame pointers are missing.
+
+Higher sampling rates and larger DWARF stack dumps cost more; start at 99 Hz.
+No overhead percentage is invented when a paired CPU baseline is unavailable.

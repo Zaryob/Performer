@@ -62,3 +62,25 @@ The 0.14 readiness/arm/seal path was also exercised in an Ubuntu 22.04
 container. Its newer Docker VM lacked readable BTF for old bpftrace, so the
 test supplied the missing tracepoint integer typedef through `--include`;
 this does not claim validation on Ubuntu 22.04's native kernel.
+
+## Native DWARF verification — 2026-10-10 (Istanbul)
+
+On the same ARM64 host, a separate eight-worker C++ target was compiled with
+`-O2 -g -fomit-frame-pointer -fno-optimize-sibling-calls -pthread`. A 5 s,
+99 Hz `collect-perf --call-graph dwarf` recording preserved the nested
+`worker → middle → leaf` chain, all nine target threads in the inventory,
+and passed schema plus SHA-256 validation. The run status was `ok`; 1,965 of
+19,650 sampled frame occurrences were unknown (10%). This is evidence for
+that binary and host, not a promise that all stripped or JIT binaries unwind.
+
+The capture starts disabled and waits for the perf control acknowledgement.
+Only samples inside its recorded BOOTTIME window are folded. The bundle keeps
+raw perf data, original addresses, DSOs, build IDs and mapping snapshots for
+later resolution with matching debug symbols. This is an optional on-CPU path;
+it does not supply off-CPU or lock measurements. See the
+[perf record manual](https://man7.org/linux/man-pages/man1/perf-record.1.html).
+
+Türkçe: Frame pointer içermeyen test hedefinde DWARF ile iç içe çağrı zinciri
+korundu. Bu yol yalnızca on-CPU toplar; off-CPU ve kilit analizi için normal
+collector kullanılır. Ham adresler ve build ID bilgisi sonradan eşleşen debug
+sembolleriyle çözümleme yapmak için pakette saklanır.
