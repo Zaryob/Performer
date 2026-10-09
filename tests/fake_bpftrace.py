@@ -19,6 +19,7 @@ ones that are awkward to get right:
     oncpu_startup_error  only the on-CPU probe fails to attach
     silent          attach, but produce no map output at all
     threadlife_silent  only threadlife has no fork/exit events
+    futex_silent    only futex sees no contended waits
     ignore_sigint   ignore SIGINT, forcing the SIGTERM escalation
     stubborn        ignore SIGINT and SIGTERM, forcing SIGKILL
     lost_events     normal, but report dropped events on stderr
@@ -323,7 +324,8 @@ def main(argv: list) -> int:
 
     if mode == "lost_events":
         print("Lost 12043 events", file=sys.stderr, flush=True)
-    if mode == "silent" or (mode == "threadlife_silent" and program == "threadlife.bt"):
+    if mode == "silent" or (mode == "threadlife_silent" and program == "threadlife.bt") \
+            or (mode == "futex_silent" and program == "futex.bt"):
         return 0
 
     print()

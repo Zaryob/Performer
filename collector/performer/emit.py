@@ -284,7 +284,14 @@ def emit_futex(context: EmitContext, text: str) -> EmitResult:
 
     totals = dict(dump.values.get("futex_by_addr", []))
     counts = dict(dump.values.get("futex_cnt_by_addr", []))
-    if totals:
+    # The probe ran but no wait crossed the threshold, so bpftrace printed no
+    # @futex map at all: an uncontended target. Record the empty table so the
+    # absence is a measurement, as threadlife does for a stable thread pool.
+    uncontended = not totals and bool(text.strip()) and "@futex" not in text
+    if uncontended:
+        result.warnings = [w for w in result.warnings if w != "produced no futex stacks"]
+        result.warnings.append("no contended futex waits above the threshold were observed")
+    if totals or uncontended:
         rows: List[List[Any]] = []
         for key, total_us in totals.items():
             calls = counts.get(key, 0)

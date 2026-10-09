@@ -523,6 +523,20 @@ class StandardProfileTests(unittest.TestCase):
             self.assertTrue(bundle.validate().ok)
             self.assertEqual(bundle.read_json(layout.HIST_THREADLIFE)["rows"], [])
 
+    def test_uncontended_target_keeps_futex_and_run_ok(self):
+        """No lock contention is a measurement, not a broken probe."""
+        with spawn_target(threads=8, seconds=90) as target, fake_bpftrace("futex_silent"):
+            result = collect(self._options(target.pid), printer=quiet)
+
+        self.assertEqual(result.preflight.get("smoke:futex").status, "pass")
+        probe = next(p for p in result.manifest["probes"] if p["name"] == "futex")
+        self.assertEqual(probe["status"], "ok")
+        self.assertTrue(any("no contended futex waits" in w for w in probe["warnings"]), probe["warnings"])
+        self.assertEqual(result.manifest["status"], "ok")
+        with Bundle.open(result.archive) as bundle:
+            self.assertTrue(bundle.validate().ok)
+            self.assertEqual(bundle.read_json(layout.HIST_FUTEX_BY_ADDR)["rows"], [])
+
     def test_threadlife_with_events_can_be_the_only_probe(self):
         profile = profiles.Profile(
             name="threadlife-only", description="event-driven probe",

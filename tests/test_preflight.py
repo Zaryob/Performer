@@ -288,6 +288,43 @@ class SmokeReuseTests(unittest.TestCase):
         self.assertEqual([c.status for c in checks], [preflight.WARN])
 
 
+class SilentFutexTests(unittest.TestCase):
+    """futex records only contended waits; an uncontended target is silent."""
+
+    def test_clean_empty_trial_is_a_valid_no_contention_observation(self):
+        profile = profiles.Profile(
+            name="futex-only", description="event-driven smoke test",
+            probes=(profiles.ProbeSpec("futex", "futex.bt"),),
+            max_duration_s=60, expected_overhead="low",
+        )
+        report = preflight.PreflightReport()
+        trial = preflight.TrialResult(
+            ran=True, stdout="Attaching 4 probes...\n", stderr="", exit_reason="sigint",
+        )
+        with mock.patch.object(preflight, "run_trial", return_value=trial):
+            check, = preflight.check_smoke(report, profile, 1)
+        self.assertTrue(report.smoke["futex"])
+        self.assertEqual(report.data_probes, [])
+        self.assertEqual(check.status, preflight.PASS)
+        self.assertIn("no contended futex wait", check.message)
+
+    def test_errors_still_disable_a_silent_futex_probe(self):
+        profile = profiles.Profile(
+            name="futex-only", description="event-driven smoke test",
+            probes=(profiles.ProbeSpec("futex", "futex.bt"),),
+            max_duration_s=60, expected_overhead="low",
+        )
+        report = preflight.PreflightReport()
+        trial = preflight.TrialResult(
+            ran=True, stdout="Attaching 4 probes...\n", stderr="Lost 12 events\n",
+            exit_reason="sigint",
+        )
+        with mock.patch.object(preflight, "run_trial", return_value=trial):
+            check, = preflight.check_smoke(report, profile, 1)
+        self.assertFalse(report.smoke["futex"])
+        self.assertEqual(check.status, preflight.WARN)
+
+
 class SilentThreadlifeTests(unittest.TestCase):
     def setUp(self):
         self.profile = profiles.Profile(
