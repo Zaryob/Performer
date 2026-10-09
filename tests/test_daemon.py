@@ -559,6 +559,28 @@ class CollectTests(DaemonTestCase):
         self.assertEqual(call["label"], "ok")
         self.assertEqual(call["duration_s"], 5)
 
+    def test_sampling_frequency_reaches_the_collector(self):
+        status, job = self.start(oncpu_hz=499)
+        self.assertEqual(status, 202)
+        self.assertEqual(job["oncpu_hz"], 499)
+        self.assertTrue(wait_until(lambda: self.collect_calls, timeout=5))
+        self.assertEqual(self.collect_calls[0]["oncpu_hz"], 499)
+
+    def test_sampling_frequency_defaults_to_99(self):
+        status, job = self.start()
+        self.assertEqual(status, 202)
+        self.assertEqual(job["oncpu_hz"], 99)
+        self.assertTrue(wait_until(lambda: self.collect_calls, timeout=5))
+        self.assertEqual(self.collect_calls[0]["oncpu_hz"], 99)
+
+    def test_invalid_sampling_frequency_rejected_before_any_job(self):
+        for hz in (True, 0, -1, 4001, 99.5, "999", None):
+            with self.subTest(hz=hz):
+                status, _body = self.start(oncpu_hz=hz)
+                self.assertEqual(status, 400)
+                self.assertEqual(self.service.jobs(), [])
+                self.assertEqual(self.collect_calls, [])
+
     def test_pmu_mode_reaches_the_collector(self):
         status, job = self.start(pmu="basic")
         self.assertEqual(status, 202)

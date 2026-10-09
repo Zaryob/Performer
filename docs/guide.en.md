@@ -649,3 +649,9 @@ too. An unresolved frame does not prove that frame pointers are missing.
 
 Higher sampling rates and larger DWARF stack dumps cost more; start at 99 Hz.
 No overhead percentage is invented when a paired CPU baseline is unavailable.
+
+The daemon's collection screen offers 99, 499 and 999 Hz on-CPU sampling;
+99 Hz remains the default. The API accepts an integer `oncpu_hz` from 1 to
+4000 and validates it before creating a job. The Overview shows the capture
+window evidence and PMU batch offsets when those sidecars are available;
+older bundles explicitly show that this timing evidence is unavailable.

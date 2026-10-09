@@ -1,6 +1,7 @@
 /** One run, summarised: what was measured, and whether to believe it. */
 
 import { useMemo } from "react";
+import { collectionTiming } from "../collectionWindow";
 import type { Bundle } from "../bundle/load";
 import { runDuration } from "../bundle/load";
 import { bundleQualityFlags, formatOverheadPct, usableOverheadPct } from "../quality";
@@ -17,6 +18,7 @@ import {
 
 export function Overview({ bundle }: { bundle: Bundle }) {
   const manifest = bundle.manifest;
+  const timing = collectionTiming(bundle);
   const flags = bundleQualityFlags(bundle);
   const quality = manifest.quality;
   const overheadPct = usableOverheadPct(quality);
@@ -64,6 +66,7 @@ export function Overview({ bundle }: { bundle: Bundle }) {
             bpftrace {manifest.tool_versions.bpftrace ?? "n/a"} · kernel{" "}
             {manifest.tool_versions.kernel ?? "n/a"} · performer{" "}
             {manifest.tool_versions.performer ?? "?"}
+            {manifest.tool_versions.perf && <> · {manifest.tool_versions.perf}</>}
           </Field>
           {manifest.notes && <Field label="notes">{manifest.notes}</Field>}
         </dl>
@@ -71,11 +74,21 @@ export function Overview({ bundle }: { bundle: Bundle }) {
 
       <Panel title="Quality">
         <dl className="mb-3 space-y-1.5">
-          <Field label="frame pointers">
+          <Field label="capture window">
+            {timing.state === "certified" || timing.state === "uncertified"
+              ? `${timing.durationS?.toFixed(3)} s · ${timing.clock} · ${timing.state}`
+              : timing.state === "missing" ? "timing evidence unavailable in this bundle" : "invalid timing evidence"}
+          </Field>
+          {(timing.pmuEnableMs || timing.pmuDisableMs) && <Field label="PMU timing">
+            {timing.pmuEnableMs && <>enable {timing.pmuEnableMs.map((n) => n.toFixed(2)).join(" to ")} ms from start; </>}
+            {timing.pmuDisableMs && <>disable {timing.pmuDisableMs.map((n) => n.toFixed(2)).join(" to ")} ms from end</>}
+            <span className="text-slate-400"> · per-thread counters are enabled in a batch</span>
+          </Field>}
+          <Field label="stack quality">
             {quality.frame_pointers_ok ? (
               <span className="text-emerald-300">ok</span>
             ) : (
-              <span className="text-red-300">missing</span>
+              <span className="text-red-300">insufficient</span>
             )}
           </Field>
           <Field label="unknown frames">

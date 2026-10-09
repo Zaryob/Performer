@@ -119,8 +119,8 @@ def quality_flags(
             Flag(
                 LEVEL_ERROR,
                 "frame_pointers",
-                "preflight decided frame pointers are missing",
-                "Rebuild the target with -fno-omit-frame-pointer.",
+                "stack trial found incomplete unwinding or symbol resolution",
+                "Check matching debug symbols and unwind information; consider frame pointers or DWARF.",
             )
         )
     if quality.get("ignore_quality"):
@@ -350,8 +350,8 @@ def render(summary: Summary, *, origin: Optional[str] = None, verbose: bool = Fa
     ratio = quality.get("unknown_frame_ratio")
     lines.append(
         _row(
-            "frame pointers",
-            "ok" if quality.get("frame_pointers_ok") else "MISSING",
+            "stack quality",
+            "ok" if quality.get("frame_pointers_ok") else "INSUFFICIENT",
         )
     )
     if isinstance(ratio, (int, float)):

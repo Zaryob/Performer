@@ -8,6 +8,7 @@
  * they need changing.
  */
 
+import { collectionTiming } from "./collectionWindow";
 import { readJson, runDuration, type Bundle } from "./bundle/load";
 import { PATHS, type HistogramDoc, type Manifest, type Quality } from "./bundle/types";
 
@@ -52,6 +53,12 @@ export function formatOverheadPct(quality: Quality): string {
 /** Inspect artifacts too: old runqlat probes could mix system-wide tasks. */
 export function bundleQualityFlags(bundle: Bundle): Flag[] {
   const flags = qualityFlags(bundle.manifest);
+  const timing = collectionTiming(bundle);
+  if (timing.state === "uncertified" || timing.state === "invalid") {
+    flags.unshift({ level: "warn", code: "capture_window", message: timing.state === "invalid"
+      ? "capture timing evidence is invalid"
+      : "a shared capture window could not be certified; compare probe totals with care" });
+  }
   if (!bundle.files.has(PATHS.runqlat)) return flags;
   if (bundle.manifest.schema_version === 1) {
     flags.push({
@@ -124,8 +131,8 @@ export function qualityFlags(manifest: Manifest): Flag[] {
     flags.push({
       level: "error",
       code: "frame_pointers",
-      message: "preflight decided frame pointers are missing",
-      hint: "Rebuild the target with -fno-omit-frame-pointer.",
+      message: "stack trial found incomplete unwinding or symbol resolution",
+      hint: "Check matching debug symbols and unwind information; consider frame pointers or DWARF.",
     });
   }
   if (quality.ignore_quality) {

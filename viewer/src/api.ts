@@ -72,6 +72,7 @@ export interface JobInfo {
   label: string;
   duration_s: number;
   pmu: "off" | "basic";
+  oncpu_hz?: number;
   state: JobState;
   started_at: number | null;
   ended_at: number | null;
@@ -89,6 +90,7 @@ export interface CollectRequest {
   label: string;
   duration_s: number;
   pmu?: "off" | "basic";
+  oncpu_hz?: number;
   tags?: string[];
   notes?: string;
 }
