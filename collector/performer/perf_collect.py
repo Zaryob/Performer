@@ -12,7 +12,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import __version__, layout, manifest, proc, profiles, symbols, window
+from . import __version__, provenance, layout, manifest, proc, profiles, symbols, window
 from .bundle import BundleBuilder
 from .collect import _interrupt_guard, _utc_for_clock
 from .errors import PerformerError, PreflightError
@@ -176,7 +176,7 @@ def collect_perf(*, pid, label, out_dir, duration_s=20.0, oncpu_hz=99,
         probes=[manifest.ProbeResult("oncpu", status=status, duration_s=elapsed, events_lost=stderr.events_lost,
                   warnings=warnings, exit_reason=probe.exit_info.reason, exit_code=probe.exit_info.exit_code,
                   thresholds={"sample_hz": oncpu_hz, "unwinder": call_graph}, outputs=[layout.STACK_ONCPU])],
-        quality=quality, tool_versions={"performer": __version__, "perf": version.stdout.strip(), "kernel": proc.system_info().get("kernel")},
+        quality=quality, tool_versions={**provenance.tool_versions(), "perf": version.stdout.strip(), "kernel": proc.system_info().get("kernel")},
         warnings=warnings)
     builder.write_manifest(document)
     return builder.pack()

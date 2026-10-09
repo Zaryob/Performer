@@ -17,6 +17,8 @@ generated here is deterministic for a given seed.
 
 from __future__ import annotations
 
+from . import provenance
+
 import datetime as _dt
 import random
 from dataclasses import dataclass, field
@@ -932,6 +934,7 @@ def generate(
             ),
         ),
         tool_versions={
+            **provenance.tool_versions(),
             "performer": _version(),
             "bpftrace": "0.20.2",
             "kernel": "5.15.0-91-generic",

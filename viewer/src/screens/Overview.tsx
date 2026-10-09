@@ -68,6 +68,12 @@ export function Overview({ bundle }: { bundle: Bundle }) {
             {manifest.tool_versions.performer ?? "?"}
             {manifest.tool_versions.perf && <> · {manifest.tool_versions.perf}</>}
           </Field>
+          {manifest.tool_versions.performer_commit && <Field label="collector commit">
+            <span className="font-mono">{manifest.tool_versions.performer_commit.slice(0, 12)}</span>
+          </Field>}
+          {manifest.tool_versions.performer_source_sha256 && <Field label="collector source">
+            <span className="font-mono">{manifest.tool_versions.performer_source_sha256.slice(0, 12)}</span>
+          </Field>}
           {manifest.notes && <Field label="notes">{manifest.notes}</Field>}
         </dl>
       </Panel>

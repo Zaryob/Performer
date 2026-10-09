@@ -30,13 +30,14 @@ for (const path of [
   revision.update(readFileSync(path));
 }
 const buildRevision = revision.digest("hex").slice(0, 12);
+const viewerVersion = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version as string;
 
 // The viewer has to open from file://, where a browser refuses to load ES
 // modules and forbids fetch() outright. Everything therefore has to end up
 // inside one index.html: no separate chunks, no asset requests, no CSS link.
 export default defineConfig({
   plugins: [react(), tailwindcss(), viteSingleFile()],
-  define: { __VIEWER_BUILD_REVISION__: JSON.stringify(buildRevision) },
+  define: { __VIEWER_BUILD_REVISION__: JSON.stringify(buildRevision), __VIEWER_VERSION__: JSON.stringify(viewerVersion) },
   base: "./",
   build: {
     outDir: "dist",

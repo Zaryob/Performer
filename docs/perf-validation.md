@@ -84,3 +84,17 @@ Türkçe: Frame pointer içermeyen test hedefinde DWARF ile iç içe çağrı zi
 korundu. Bu yol yalnızca on-CPU toplar; off-CPU ve kilit analizi için normal
 collector kullanılır. Ham adresler ve build ID bilgisi sonradan eşleşen debug
 sembolleriyle çözümleme yapmak için pakette saklanır.
+
+## Build identity
+
+Collector and viewer now report version `0.2.0`; bundle format remains version
+2 and the viewer still accepts versions 1–2. New bundles record
+`tool_versions.performer_commit` when a checkout or packaged commit is known,
+and `performer_source_sha256` over collector, probe, profile and schema contents.
+The content hash also identifies local edits and source archives without Git.
+Installed packages retain the build commit without requiring Git on the target.
+
+Debian filenames/versions include the source content fingerprint and Ubuntu
+release. The viewer footer includes its version and a deterministic source
+fingerprint that matches local and Docker builds. The Overview shows collector
+identity as well, so a stale viewer or mismatched capture can be identified.

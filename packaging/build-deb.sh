@@ -17,7 +17,8 @@ fi
 
 command -v dpkg-deb >/dev/null || { echo "dpkg-deb is required" >&2; exit 2; }
 version=$(PYTHONPATH=collector python3 -c 'from performer import __version__; print(__version__)')
-package_version="${version}+ubuntu${VERSION_ID}"
+source_identity=$(PYTHONPATH=collector python3 -c 'from performer.provenance import tool_versions; v=tool_versions(); print(v["performer_source_sha256"])')
+package_version="${version}+source${source_identity:0:12}+ubuntu${VERSION_ID}"
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 payload="$stage/usr/share/performer"
@@ -25,6 +26,8 @@ payload="$stage/usr/share/performer"
 while IFS= read -r -d '' file; do
   install -Dm644 "$file" "$payload/$file"
 done < <(find collector/performer -type f -name '*.py' -print0)
+build_commit=$(PYTHONPATH=collector python3 -c 'import os; from performer.provenance import tool_versions; c=tool_versions()["performer_commit"] or os.environ.get("CI_COMMIT_SHA") or os.environ.get("GITHUB_SHA"); c=c if isinstance(c,str) and len(c)==40 and all(x in "0123456789abcdef" for x in c) else None; print(repr(c))')
+printf 'BUILD_COMMIT = %s\n' "$build_commit" > "$payload/collector/performer/_build.py"
 install -Dm755 collector/bin/performer "$payload/collector/bin/performer"
 for file in collector/profiles/*.yaml probes/*.bt schema/*.json; do
   install -Dm644 "$file" "$payload/$file"

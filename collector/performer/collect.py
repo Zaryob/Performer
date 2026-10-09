@@ -14,6 +14,8 @@ directory and a traceback -- is how measurements get repeated at 2am.
 
 from __future__ import annotations
 
+from . import provenance
+
 import datetime as _dt
 import json
 import os
@@ -430,6 +432,7 @@ def _collect(
         probes=probe_results,
         quality=quality,
         tool_versions={
+            **provenance.tool_versions(),
             "performer": __version__,
             "bpftrace": report.bpftrace_version,
             "kernel": proc.system_info().get("kernel"),
