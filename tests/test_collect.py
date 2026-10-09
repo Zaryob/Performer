@@ -478,6 +478,21 @@ class StandardProfileTests(unittest.TestCase):
         kwargs.update(overrides)
         return CollectOptions(**kwargs)
 
+    def _measured_overhead(self, result) -> float:
+        """The estimate, or a skip that says why this host could not measure it.
+
+        A missing estimate is not a passing budget: a busy or restricted host
+        reports ``None`` with a note, and the test must surface that rather
+        than compare ``None`` with a number or treat it as zero.
+        """
+        quality = result.manifest["quality"]
+        overhead = quality["estimated_overhead_pct"]
+        if overhead is None:
+            reasons = [note for note in quality.get("notes", []) if "overhead" in note]
+            self.assertTrue(reasons, "overhead is missing without a quality note explaining why")
+            self.skipTest(f"{result.manifest['label']}: overhead not measured: " + "; ".join(reasons))
+        return overhead
+
     def test_every_probe_in_the_profile_delivers(self):
         with spawn_target(threads=32, seconds=90) as target, fake_bpftrace("normal"):
             result = collect(self._options(target.pid), printer=quiet)
@@ -570,7 +585,7 @@ class StandardProfileTests(unittest.TestCase):
                 self._options(target.pid, duration_s=8.0, overhead_window_s=3.0),
                 printer=quiet,
             )
-        overhead = result.manifest["quality"]["estimated_overhead_pct"]
+        overhead = self._measured_overhead(result)
         self.assertLess(overhead, 15.0, f"estimated overhead {overhead}%")
 
     def test_overhead_is_not_inflated_by_probe_startup(self):
@@ -598,7 +613,7 @@ class StandardProfileTests(unittest.TestCase):
         standard_probes = len(many.manifest["probes"])
         self.assertGreater(standard_probes, light_probes)
         for result in (one, many):
-            overhead = result.manifest["quality"]["estimated_overhead_pct"]
+            overhead = self._measured_overhead(result)
             self.assertLess(overhead, 25.0, f"{result.manifest['label']}: {overhead}%")
 
     def test_target_killed_mid_run_leaves_a_partial_but_readable_bundle(self):
