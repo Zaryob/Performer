@@ -89,6 +89,22 @@ class BundleBuilder:
 
     # -- payload -------------------------------------------------------
 
+    def set_started_at(self, started_at: _dt.datetime) -> None:
+        """Name the completed bundle after tracing started, not compilation.
+
+        Call after probe files are closed. Moving the directory preserves all
+        payload paths and hashes; a conflicting run is never overwritten.
+        """
+        run_id = manifest_mod.make_run_id(self.label, started_at)
+        destination = self.out_dir / layout.run_dir_name(run_id)
+        if destination != self.root:
+            if destination.exists():
+                raise BundleError(f"run directory already exists: {destination}")
+            self.root.rename(destination)
+            self.root = destination
+        self.run_id = run_id
+        self.started_at = started_at
+
     def path_for(self, relpath: str) -> Path:
         if not layout.is_safe_relpath(relpath):
             raise BundleError(f"unsafe bundle path {relpath!r}")

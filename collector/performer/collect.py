@@ -14,16 +14,23 @@ directory and a traceback -- is how measurements get repeated at 2am.
 
 from __future__ import annotations
 
+from . import provenance
+
 import datetime as _dt
+import json
+import os
+import re
+import secrets
 import signal
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from . import emit, layout, manifest as manifest_mod, preflight as preflight_mod
-from . import pmu as pmu_mod, proc, profiles
+from . import pmu as pmu_mod, proc, profiles, symbols, window
 from . import __version__
 from .bundle import BundleBuilder
 from .errors import PerformerError, PreflightError
@@ -175,6 +182,7 @@ def _collect(
     )
 
     target_static = proc.target_info(options.pid)
+    modules_start = symbols.modules_snapshot(options.pid)
 
     watcher = TargetWatcher(options.pid)
     sampler = SeriesSampler(options.pid)
@@ -182,43 +190,91 @@ def _collect(
     # while the probes are still attaching is not lost between the two.
     interrupted = cancel if cancel is not None else threading.Event()
 
-    launched = _launch_probes(builder, profile, report, options, printer)
-    # Runtime deltas should cover collection, not compilation or map printing.
-    threads_start = proc.snapshot_threads(options.pid)
+    control_token = secrets.randbelow(2**31 - 1) + 1
+    control_path = builder.root / layout.DIR_RAW / ".window-control.json"
+    launched = _launch_probes(
+        builder, profile, report, options, printer,
+        control_token=control_token, control_path=control_path,
+    )
+    active = [probe for _spec, probe in launched if probe.alive and probe.attached]
+    start_ns = window.clock_now_ns() + window.ARM_LEAD_NS
+    end_ns = start_ns + int(options.duration_s * 1_000_000_000) if options.duration_s is not None else 0
+    window_notes: List[str] = []
+    pmu_bounds: Dict[str, int] = {}
 
-    # The CPU reading and the clock have to start at the same instant. Taking
-    # the reading before the probes attach would charge the attach time --
-    # seconds of it, growing with the number of probes -- to a window measured
-    # from after it, inflating the overhead estimate in proportion to how much
-    # was being measured.
-    ticks_start = proc.cpu_ticks(options.pid)
-    run_started = time.monotonic()
-    if pmu_session is not None:
-        try:
-            pmu_session.start()
-        except OSError:
-            stop_all([probe for _spec, probe in launched])
-            raise
-    watcher.start()
-    sampler.start()
+    def arm_bounds(begin: int, end: int, deadline: int, *, sealed: bool = False) -> None:
+        # Only test doubles read this file. Real probes receive bounds from
+        # the collector's private, harmless prctl control event.
+        control_clock = window.signal_bounds(begin, end, control_token=control_token)
+        control_path.write_text(json.dumps({
+            "start_ns": begin, "end_ns": end, "sealed": sealed,
+            "control_clock_ns": (control_clock[0] + control_clock[1]) // 2,
+        }))
+        window.wait_for_ack(active, begin, end, deadline, sealed=sealed, control_window_ns=control_clock)
+
+    def wait_until(boundary: int) -> None:
+        while window.clock_now_ns() < boundary:
+            time.sleep(max(0.0, min(0.01, (boundary - window.clock_now_ns()) / 1_000_000_000)))
 
     outcome = None
     # The guard stays up until every probe has exited: bpftrace writes its
     # maps only after SIGINT, which can take a minute, and a second Ctrl-C in
     # that minute must not kill the collector and lose them.
-    with _interrupt_guard(interrupted, printer):
+    with _interrupt_guard(interrupted, printer), _collection_cleanup(launched, watcher, sampler, control_path):
+        try:
+            arm_bounds(start_ns, end_ns, start_ns)
+            wait_until(start_ns)
+            started_at = _utc_for_clock(start_ns)
+            ticks_start = proc.cpu_ticks(options.pid)
+            if pmu_session is not None:
+                pmu_bounds["enable_begin_ns"] = window.clock_now_ns()
+                pmu_session.start()
+                pmu_bounds["enable_end_ns"] = window.clock_now_ns()
+            snapshot_start_ns = window.clock_now_ns()
+            threads_start = proc.snapshot_threads(options.pid)
+            snapshot_start_end_ns = window.clock_now_ns()
+            watcher.start()
+            sampler.start()
+        except Exception:
+            stop_all([probe for _spec, probe in launched])
+            control_path.unlink(missing_ok=True)
+            raise
         outcome = wait_for_run(
             duration_s=options.duration_s,
             watcher=watcher,
             probes=[p for _spec, p in launched],
             interrupted=interrupted,
+            monotonic=lambda: window.clock_now_ns() / 1_000_000_000,
+            started_at=start_ns / 1_000_000_000,
         )
-        # Closed together, for the same reason they were opened together.
-        elapsed = time.monotonic() - run_started
+        if outcome.reason != "duration":
+            # Close ahead of time, so no aggregate contains already-recorded
+            # events newer than a backdated cancellation timestamp.
+            closing_ns = window.clock_now_ns() + window.ARM_LEAD_NS
+            end_ns = min(end_ns, closing_ns) if end_ns else closing_ns
+            active = [probe for probe in active if probe.alive]
+            try:
+                arm_bounds(start_ns, end_ns, end_ns)
+            except PerformerError as error:
+                window_notes.append(str(error))
+        wait_until(end_ns)
+        elapsed = (end_ns - start_ns) / 1_000_000_000
+        ended_at = started_at + _dt.timedelta(seconds=elapsed)
         if pmu_session is not None:
+            pmu_bounds["disable_begin_ns"] = window.clock_now_ns()
             pmu_session.stop()
+            pmu_bounds["disable_end_ns"] = window.clock_now_ns()
         ticks_end = proc.cpu_ticks(options.pid)
+        snapshot_end_ns = window.clock_now_ns()
         threads_end = proc.snapshot_threads(options.pid)
+        snapshot_end_end_ns = window.clock_now_ns()
+        # Seal pending off-CPU waits at the same canonical boundary. A crashed
+        # probe retains only its final witnessed checkpoint instead.
+        active = [probe for probe in active if probe.alive]
+        try:
+            arm_bounds(start_ns, end_ns, window.clock_now_ns() + window.ARM_LEAD_NS, sealed=True)
+        except PerformerError as error:
+            window_notes.append(str(error))
 
         # ---- stop everything ----------------------------------------
         printer(f"stopping probes after {elapsed:.1f}s ({outcome.reason})")
@@ -231,8 +287,7 @@ def _collect(
                 f"(SIGKILL at {SIGINT_TIMEOUT_S:.0f}s would lose them; please wait)"
             ),
         )
-
-    ended_at = manifest_mod.utc_now()
+    control_path.unlink(missing_ok=True)
 
     cpu_after = (
         proc.sample_cpu(options.pid, options.overhead_window_s)
@@ -244,6 +299,32 @@ def _collect(
     probe_results = _finish_probes(
         builder, launched, report, profile, options, printer, elapsed
     )
+    builder.set_started_at(started_at)
+    builder.add_json("meta/modules.json", {
+        "schema_version": layout.SCHEMA_VERSION,
+        "source": "/proc/pid/maps and ELF GNU build-id",
+        "start": modules_start,
+        "end": symbols.modules_snapshot(options.pid) if proc.is_same_process(options.pid, watcher.start_time_ticks) else [],
+        "offset_unit": "hexadecimal file offsets and virtual addresses; not inferred ELF symbol addresses",
+    })
+    builder.add_json(layout.META_WINDOW, {
+        "schema_version": layout.SCHEMA_VERSION,
+        "clock": "boottime",
+        "start_ns": start_ns,
+        "end_ns": end_ns,
+        "gate": "timestamp predicates armed by collector prctl",
+        "certified": not window_notes,
+        "probes": {spec.name: {
+            "process_lifetime_s": probe.exit_info.duration_s,
+            "window_complete": probe.exit_info.reason == "sigint" and not window_notes,
+        } for spec, probe in launched},
+        "snapshot_start_begin_ns": snapshot_start_ns,
+        "snapshot_start_end_ns": snapshot_start_end_ns,
+        "snapshot_end_begin_ns": snapshot_end_ns,
+        "snapshot_end_end_ns": snapshot_end_end_ns,
+        "pmu": pmu_bounds or None,
+        "warnings": window_notes,
+    })
     if pmu_session is not None:
         pmu_doc = pmu_session.document()
         builder.add_json(layout.PMU_COUNTERS, pmu_doc)
@@ -275,8 +356,8 @@ def _collect(
         layout.META_THREADS,
         {
             "schema_version": layout.SCHEMA_VERSION,
-            "sampled_at_start": manifest_mod.format_ts(started_at),
-            "sampled_at_end": manifest_mod.format_ts(ended_at),
+            "sampled_at_start": manifest_mod.format_ts(started_at + _dt.timedelta(seconds=(snapshot_start_ns - start_ns) / 1e9)),
+            "sampled_at_end": manifest_mod.format_ts(started_at + _dt.timedelta(seconds=(snapshot_end_ns - start_ns) / 1e9)),
             "clk_tck": proc.CLK_TCK,
             "threads": proc.merge_thread_snapshots(threads_start, threads_end),
         },
@@ -300,6 +381,12 @@ def _collect(
     ended_by_target_exit = outcome.reason == "target_died"
 
     warnings: List[str] = []
+    warnings.extend(window_notes)
+    if window_notes:
+        for probe_result in probe_results:
+            if probe_result.status == "ok":
+                probe_result.status = "partial"
+                probe_result.warnings.append("shared collection boundary could not be certified; see meta/window.json")
     if ended_by_target_exit and until_exit:
         warnings.append("target exited, ending the run as requested by --until-exit")
     elif ended_by_target_exit:
@@ -345,6 +432,7 @@ def _collect(
         probes=probe_results,
         quality=quality,
         tool_versions={
+            **provenance.tool_versions(),
             "performer": __version__,
             "bpftrace": report.bpftrace_version,
             "kernel": proc.system_info().get("kernel"),
@@ -383,6 +471,31 @@ def _check_duration(options: CollectOptions, profile: Profile) -> None:
             f"{profile.max_duration_s}s (expected overhead {profile.expected_overhead}); "
             f"{options.duration_s:g}s was requested. Re-run with --force to override."
         )
+
+
+def _utc_for_clock(timestamp_ns: int) -> _dt.datetime:
+    """Translate a kernel boot-clock boundary to UTC, retaining microseconds."""
+    offset = time.time_ns() - window.clock_now_ns()
+    seconds, nanos = divmod(timestamp_ns + offset, 1_000_000_000)
+    return _dt.datetime.fromtimestamp(seconds, _dt.timezone.utc).replace(microsecond=nanos // 1000)
+
+
+@contextmanager
+def _collection_cleanup(launched, watcher, sampler, control_path):
+    """Stop every resource even if a clock, snapshot or counter operation fails."""
+    try:
+        yield
+    finally:
+        try:
+            sampler.stop()
+        finally:
+            try:
+                watcher.stop()
+            finally:
+                try:
+                    stop_all([probe for _spec, probe in launched])
+                finally:
+                    control_path.unlink(missing_ok=True)
 
 
 def _blocking_failures(
@@ -455,6 +568,9 @@ def _launch_probes(
     report: preflight_mod.PreflightReport,
     options: CollectOptions,
     printer: Printer,
+    *,
+    control_token: Optional[int] = None,
+    control_path: Optional[Path] = None,
 ) -> List[tuple]:
     """Start every probe that passed its smoke test."""
     bpftrace = report.bpftrace_path or "bpftrace"
@@ -464,31 +580,38 @@ def _launch_probes(
         int(options.duration_s + (options.attach_grace_s or ATTACH_GRACE_S) + 30)
         if options.duration_s else 86400
     )
-    # Start concurrently, then confirm each probe is executing eBPF before
-    # starting the collection timer. A faster probe can trace while another
-    # is loading, so its maps can include this brief leading interval.
+    # Probe readiness runs while data handlers stay closed. Every survivor
+    # later receives the same future start/end timestamp pair.
     launched: List[tuple] = []
-    for spec in profile.probes:
-        if not report.smoke.get(spec.name):
-            continue
-        probe = ProbeProcess(
-            name=spec.name,
-            argv=profiles.probe_command(
-                spec, options.pid, watchdog, bpftrace=bpftrace,
-                oncpu_hz=options.oncpu_hz,
-                generated_dir=builder.root / layout.DIR_RAW,
-            ),
-            stdout_path=builder.root / layout.DIR_RAW / f"{spec.name}.stdout.log",
-            stderr_path=builder.probe_log_path(spec.name),
-            env=preflight_mod.bpftrace_env(),
-        )
-        probe.start()
-        launched.append((spec, probe))
+    try:
+        for spec in profile.probes:
+            if not report.smoke.get(spec.name):
+                continue
+            probe = ProbeProcess(
+                name=spec.name,
+                argv=profiles.probe_command(
+                    spec, options.pid, watchdog, bpftrace=bpftrace,
+                    oncpu_hz=options.oncpu_hz,
+                    generated_dir=builder.root / layout.DIR_RAW,
+                    window_control_pid=os.getpid() if control_token is not None else None,
+                    window_control_token=control_token or 0,
+                ),
+                stdout_path=builder.root / layout.DIR_RAW / f"{spec.name}.stdout.log",
+                stderr_path=builder.probe_log_path(spec.name),
+                env={**preflight_mod.bpftrace_env(), **(
+                    {"PERFORMER_WINDOW_CONTROL": str(control_path)} if control_path else {}
+                )},
+            )
+            probe.start()
+            launched.append((spec, probe))
 
-    surviving = wait_for_attach_all(
-        [probe for _spec, probe in launched],
-        options.attach_grace_s or ATTACH_GRACE_S,
-    )
+        surviving = wait_for_attach_all(
+            [probe for _spec, probe in launched],
+            options.attach_grace_s or ATTACH_GRACE_S,
+        )
+    except BaseException:
+        stop_all([probe for _spec, probe in launched])
+        raise
     for spec, probe in launched:
         if surviving.get(spec.name):
             printer(f"  probe '{spec.name}' attached (pid {probe.pid})")
@@ -547,7 +670,15 @@ def _finish_probes(
         status = "ok"
 
         stdout = probe.read_stdout()
+        gate_start = re.search(r"^@_performer_start:\s*(\d+)\s*$", stdout, re.M)
+        observed_end = re.search(r"^@_performer_observed_end:\s*(\d+)\s*$", stdout, re.M)
+        observed_duration = elapsed_s if probe.attached else 0.0
+        if gate_start is not None and observed_end is not None:
+            observed_duration = max(0.0, (int(observed_end.group(1)) - int(gate_start.group(1))) / 1e9)
         emitted = emit.emit(spec.name, context, stdout)
+        evidence = symbols.stack_evidence(stdout, spec.name)
+        if evidence["records"]:
+            builder.add_json(f"meta/{spec.name}.frames.json", evidence)
         warnings.extend(emitted.warnings)
         outputs.extend(emitted.outputs)
         for note in emitted.notes:
@@ -569,6 +700,9 @@ def _finish_probes(
             status = "failed"
         elif info.reason == "sigterm" or stderr_summary.events_lost:
             status = "partial"
+        elif info.reason == "exited":
+            status = "partial"
+            warnings.append("probe exited independently; the full shared measurement window is not guaranteed")
         elif stderr_summary.has_errors:
             status = "partial"
 
@@ -583,7 +717,7 @@ def _finish_probes(
                 status=status,
                 events_lost=stderr_summary.events_lost,
                 warnings=warnings,
-                duration_s=round(info.duration_s, 2),
+                duration_s=round(min(elapsed_s, observed_duration), 6),
                 exit_reason=info.reason,
                 exit_code=info.exit_code,
                 thresholds=_probe_thresholds(spec, options.oncpu_hz),

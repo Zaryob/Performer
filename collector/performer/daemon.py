@@ -87,6 +87,7 @@ class Job:
     label: str
     duration_s: float
     pmu: str = "off"
+    oncpu_hz: int = profiles.DEFAULT_ONCPU_HZ
     state: str = "queued"  # queued | running | done | failed | cancelled
     started_at: Optional[float] = None
     ended_at: Optional[float] = None
@@ -104,6 +105,7 @@ class Job:
             "label": self.label,
             "duration_s": self.duration_s,
             "pmu": self.pmu,
+            "oncpu_hz": self.oncpu_hz,
             "state": self.state,
             "started_at": self.started_at,
             "ended_at": self.ended_at,
@@ -425,6 +427,11 @@ class Service:
         pmu_mode = body.get("pmu", "off")
         if pmu_mode not in ("off", "basic"):
             raise Rejected(HTTPStatus.BAD_REQUEST, "pmu must be 'off' or 'basic'")
+        oncpu_hz = body.get("oncpu_hz", profiles.DEFAULT_ONCPU_HZ)
+        try:
+            profiles.validate_oncpu_hz(oncpu_hz)
+        except PerformerError as exc:
+            raise Rejected(HTTPStatus.BAD_REQUEST, str(exc)) from exc
         tags = validate_tags(body.get("tags"))
         notes = validate_notes(body.get("notes"))
 
@@ -458,6 +465,7 @@ class Service:
                 label=label,
                 duration_s=duration,
                 pmu=pmu_mode,
+                oncpu_hz=oncpu_hz,
             )
             self._jobs[job.id] = job
             self._order.append(job.id)
@@ -516,6 +524,7 @@ class Service:
                 notes=notes,
                 bpftrace=self.options.bpftrace,
                 pmu=job.pmu,
+                oncpu_hz=job.oncpu_hz,
                 printer=printer,
                 cancel=self._cancel,
             )
@@ -576,6 +585,7 @@ def _real_collect(
     notes: str,
     bpftrace: Optional[str],
     pmu: str,
+    oncpu_hz: int,
     printer: Callable[[str], None],
     cancel: threading.Event,
 ) -> Any:
@@ -593,6 +603,7 @@ def _real_collect(
             notes=notes,
             bpftrace=bpftrace,
             pmu=pmu,
+            oncpu_hz=oncpu_hz,
         ),
         printer=printer,
         cancel=cancel,

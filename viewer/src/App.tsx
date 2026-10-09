@@ -13,6 +13,7 @@ import { MIN_SUPPORTED_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSION } from "./bundle
 import { Empty } from "./components/ui";
 
 declare const __VIEWER_BUILD_REVISION__: string;
+declare const __VIEWER_VERSION__: string;
 
 const SCREENS = [
   "Runs",
@@ -169,7 +170,7 @@ export function App() {
             className="ml-auto whitespace-nowrap rounded border border-slate-700 px-2 py-0.5 font-mono text-[11px] text-slate-400"
             title="Viewer source fingerprint; use this to identify an older page or container"
           >
-            bundles v{MIN_SUPPORTED_SCHEMA_VERSION}–v{SUPPORTED_SCHEMA_VERSION} · build {__VIEWER_BUILD_REVISION__}
+            viewer {__VIEWER_VERSION__} · bundles v{MIN_SUPPORTED_SCHEMA_VERSION}–v{SUPPORTED_SCHEMA_VERSION} · build {__VIEWER_BUILD_REVISION__}
           </span>
           {selected && (
             <span className="text-xs text-slate-400">

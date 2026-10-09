@@ -27,3 +27,29 @@ npm run build
 Synthetic data demonstrates the package/validation/viewer path only. It measures neither profiler overhead nor capture accuracy, eBPF behavior, perf permissions, production load or privacy of real profiles. Native macOS collector checks also failed because this collector depends on Linux facilities; macOS is not claimed as a supported collection host.
 
 Remaining live measurement gates: [#8](https://github.com/Zaryob/Performer/issues/8). Existing [PR #6](https://github.com/Zaryob/Performer/pull/6) is independent and is not counted as this change's validation.
+
+## Follow-up verification — 2026-10-10 (Istanbul)
+
+The historical baseline above is preserved. Follow-up work was split into
+commits for common collection windows, a real perf comparison, native symbol
+and DWARF evidence, viewer controls/quality, and build provenance.
+
+- Native ARM64 Linux: **529 tests passed, 3 skipped** (163.153 s).
+- After the final module identity/loss parsing guard: **34 focused tests passed**,
+  plus live mapped ELF build-ID and native perf.data loss parsing checks.
+- Viewer: **133 tests passed**, TypeScript check and single-file build passed.
+- Ubuntu 22.04 Docker: Debian artifact built, installed and packaged CLI plus
+  synthetic PMU bundle smoke checks passed.
+- GitHub's Ubuntu 22.04, Ubuntu 24.04 and offline viewer jobs passed for the
+  feature commits; the final branch head is required to pass again before merge.
+- Real 120-worker reference comparison: every worker appeared in both profilers
+  within the shared 20 s gate; Performer also sampled main once (121 TIDs).
+- Native DWARF: nested callchain retained in a target built without frame pointers.
+- Integrated standard + PMU: certified 5 s gate, 17 measured PMU threads, module
+  identity and original stack evidence retained; bundle hashes validated.
+
+Details, reproduction and limits: [perf validation](perf-validation.md).
+Concurrent profilers do not establish isolated collection overhead. The old
+ResourceWarnings in daemon test subprocess helpers remain visible in the native
+suite log. Browser visual verification was not performed. Broader workload and
+controlled overhead requirements in issue #8 remain open.

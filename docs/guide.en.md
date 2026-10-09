@@ -108,10 +108,12 @@ stopping probes after 30.0s (duration)
 status:        ok
 ```
 
-Every probe starts before any of them is waited on, and they are all SIGINTed
-at the same instant, so the window the manifest records is the window they all
-actually covered — otherwise the first probe would trace seconds the last one
-missed.
+Probes attach concurrently but their data handlers stay closed. After every
+survivor reports readiness, the collector arms identical future start/end
+timestamps and verifies acknowledgements. Those timestamp predicates define
+the shared eBPF window; SIGINT later prints the maps. `meta/window.json` also
+records the offset of sequential `/proc` snapshots and PMU enable/disable
+batches. Older bundles without that metadata may include attachment time.
 
 Preflight reports probe startup failures as warnings and collects with the
 probes that passed. The bundle is marked partial and records failed probes.
@@ -624,3 +626,32 @@ literally.
 ## Licence
 
 Apache 2.0 — see [LICENSE](../LICENSE).
+
+
+## Native perf / DWARF capture
+
+```sh
+sudo ./collector/bin/performer collect-perf --pid 1234 --label native-dwarf \
+  --duration 20 --oncpu-hz 99 --call-graph dwarf --out runs
+```
+
+This optional path requires a usable Linux `perf` executable. It records on-CPU
+callchains in the same version 2 bundle, readable by the offline viewer. DWARF
+can unwind binaries that omit frame pointers when they carry suitable unwind
+information. `--call-graph fp` is available for targets built with frame pointers;
+`--dwarf-stack-size` controls saved stack bytes (8192 by default).
+
+This path does not collect off-CPU, locks or PMU counters. Raw `perf.data`, build
+IDs, module mappings and original addresses are retained for later symbol
+resolution with matching binaries/debug symbols. Normal bpftrace collection now
+retains module/build-ID snapshots and original stack text in `meta/*.frames.json`
+too. An unresolved frame does not prove that frame pointers are missing.
+
+Higher sampling rates and larger DWARF stack dumps cost more; start at 99 Hz.
+No overhead percentage is invented when a paired CPU baseline is unavailable.
+
+The daemon's collection screen offers 99, 499 and 999 Hz on-CPU sampling;
+99 Hz remains the default. The API accepts an integer `oncpu_hz` from 1 to
+4000 and validates it before creating a job. The Overview shows the capture
+window evidence and PMU batch offsets when those sidecars are available;
+older bundles explicitly show that this timing evidence is unavailable.

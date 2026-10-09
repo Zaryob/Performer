@@ -66,6 +66,7 @@ class ProbeProcess:
     stdout_path: Path
     stderr_path: Path
     env: Optional[Dict[str, str]] = None
+    pass_fds: Sequence[int] = ()
     warnings: List[str] = field(default_factory=list)
 
     _proc: Optional[subprocess.Popen] = field(default=None, init=False, repr=False)
@@ -96,6 +97,7 @@ class ProbeProcess:
                 start_new_session=True,
                 env=environment,
                 shell=False,
+                pass_fds=tuple(self.pass_fds),
             )
         except OSError as exc:
             self._close_files()
@@ -518,13 +520,14 @@ def wait_for_run(
     poll_s: float = 0.25,
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
+    started_at: Optional[float] = None,
 ) -> WaitOutcome:
     """Block until the run should end, and say why.
 
     ``duration_s`` of None means "until the target exits", which is what
     ``collect --until-exit`` asks for.
     """
-    started = monotonic()
+    started = monotonic() if started_at is None else started_at
     while True:
         elapsed = monotonic() - started
         if duration_s is not None and elapsed >= duration_s:
@@ -535,4 +538,5 @@ def wait_for_run(
             return WaitOutcome("interrupted", elapsed)
         if probes and all(not p.alive for p in probes if p.started):
             return WaitOutcome("probes_exited", elapsed)
-        sleep(poll_s)
+        remaining = duration_s - elapsed if duration_s is not None else poll_s
+        sleep(min(poll_s, max(0.0, remaining)))

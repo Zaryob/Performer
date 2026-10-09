@@ -155,7 +155,7 @@ def emit_offcpu(context: EmitContext, text: str) -> EmitResult:
         result.warnings.append(
             f"included {len(pending.entries)} right-censored off-CPU intervals "
             f"({pending.total_us:,} us observed): these threads had not resumed at the "
-            "last 100 ms tracing checkpoint; their full waits are unknown and "
+            "observed tracing boundary; their full waits are unknown and "
             "the duration histogram includes completed intervals only"
         )
     dump = hist_parse.parse_maps(text)

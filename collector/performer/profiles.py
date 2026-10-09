@@ -143,6 +143,8 @@ def probe_command(
     bpftrace: str,
     oncpu_hz: int = DEFAULT_ONCPU_HZ,
     generated_dir: Optional[Path] = None,
+    window_control_pid: Optional[int] = None,
+    window_control_token: int = 0,
 ) -> List[str]:
     """Build the same probe command for preflight and actual collection.
 
@@ -152,8 +154,8 @@ def probe_command(
     """
     validate_oncpu_hz(oncpu_hz)
     program = program_path(spec)
+    source = program.read_text(encoding="utf-8")
     if spec.name == "oncpu":
-        source = program.read_text(encoding="utf-8")
         if (
             len(_ANY_PROFILE_ATTACHPOINT.findall(source)) != 1
             or len(_ONCPU_ATTACHPOINT.findall(source)) != 1
@@ -165,15 +167,22 @@ def probe_command(
         if oncpu_hz != DEFAULT_ONCPU_HZ:
             if generated_dir is None:
                 raise PerformerError("a directory is required for a generated oncpu probe")
-            modified = _ONCPU_ATTACHPOINT.sub(f"profile:hz:{oncpu_hz}", source)
-            destination = Path(generated_dir) / spec.program
-            if destination.resolve() == program.resolve():
-                raise PerformerError(
-                    "generated oncpu probe cannot overwrite the installed program"
-                )
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(modified, encoding="utf-8")
-            program = destination
+            source = _ONCPU_ATTACHPOINT.sub(f"profile:hz:{oncpu_hz}", source)
+    if window_control_pid is not None:
+        from .window import render_program
+        source = render_program(
+            source, window_control_pid, offcpu=spec.name == "offcpu",
+            control_token=window_control_token,
+        )
+    if window_control_pid is not None or (spec.name == "oncpu" and oncpu_hz != DEFAULT_ONCPU_HZ):
+        if generated_dir is None:
+            raise PerformerError("a directory is required for a generated probe")
+        destination = Path(generated_dir) / spec.program
+        if destination.resolve() == program.resolve():
+            raise PerformerError("generated probe cannot overwrite the installed program")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(source, encoding="utf-8")
+        program = destination
     # Readiness comes from printf in the first executing eBPF interval. A
     # file-backed stdout must flush that line before collection can begin.
     return [bpftrace, "-B", "line", str(program), *spec.probe_args(pid, watchdog_s)]

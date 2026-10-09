@@ -33,6 +33,7 @@ This is a test double, not a simulator: it makes no attempt to be bpftrace.
 from __future__ import annotations
 
 import os
+import json
 import signal
 import sys
 import time
@@ -303,7 +304,21 @@ def main(argv: list) -> int:
         print("PERFORMER_READY", flush=True)
 
     deadline = time.monotonic() + watchdog
+    control_path = os.environ.get("PERFORMER_WINDOW_CONTROL")
+    last_ack = None
     while not _stop and time.monotonic() < deadline:
+        if control_path:
+            try:
+                with open(control_path) as control:
+                    bounds = json.load(control)
+                kind = "PERFORMER_WINDOW_SEALED" if bounds.get("sealed") else "PERFORMER_WINDOW"
+                ack = (kind, bounds["start_ns"], bounds["end_ns"], bounds["control_clock_ns"])
+                if ack != last_ack:
+                    print(f"{kind} {ack[1]} {ack[2]}", flush=True)
+                    print(f"PERFORMER_CLOCK {ack[3]}", flush=True)
+                    last_ack = ack
+            except (OSError, ValueError, KeyError):
+                pass
         time.sleep(0.05)
 
     if mode == "lost_events":
@@ -319,6 +334,9 @@ def main(argv: list) -> int:
         # invents a probe name is not silently given nothing.
         body = OUTPUT_BY_PROBE.get(program, ONCPU)
     sys.stdout.write(body.format(comm=comm))
+    if control_path and last_ack:
+        print(f"\n@_performer_start: {last_ack[1]}")
+        print(f"@_performer_observed_end: {last_ack[2]}")
     sys.stdout.flush()
     return 0
 

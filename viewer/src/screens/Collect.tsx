@@ -41,6 +41,7 @@ export function Collect({
   const [pid, setPid] = useState<number | null>(null);
   const [profileName, setProfileName] = useState<string>("");
   const [duration, setDuration] = useState(60);
+  const [oncpuHz, setOncpuHz] = useState(99);
   const [pmu, setPmu] = useState<"off" | "basic">("off");
   const [label, setLabel] = useState("");
   const [notes, setNotes] = useState("");
@@ -140,6 +141,7 @@ export function Collect({
         label: label.trim(),
         duration_s: duration,
         pmu,
+        oncpu_hz: oncpuHz,
         notes: notes.trim() || undefined,
       }));
       setOpened(null);
@@ -281,6 +283,21 @@ export function Collect({
                 most {formatDuration(profile.max_duration_s)}
               </p>
             )}
+
+            <label className="flex flex-col gap-1 text-xs text-slate-400">
+              on-CPU sampling
+              <select
+                aria-label="on-CPU sampling"
+                value={oncpuHz}
+                onChange={(event) => setOncpuHz(Number(event.target.value))}
+                className="rounded border border-slate-600 bg-slate-950 px-2 py-1.5 text-sm text-slate-100"
+              >
+                <option value={99}>99 Hz · default</option>
+                <option value={499}>499 Hz</option>
+                <option value={999}>999 Hz</option>
+              </select>
+              {oncpuHz > 99 && <span className="text-amber-200">More samples can reveal short bursts, but increase collection cost.</span>}
+            </label>
 
             <label className="flex flex-col gap-1 text-xs text-slate-400">
               hardware counters

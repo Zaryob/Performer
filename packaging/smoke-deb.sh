@@ -17,3 +17,6 @@ performer fake-run --pmu basic --out "$tmp/runs" --label package-smoke
 bundles=("$tmp"/runs/*.tgz)
 performer validate --verify-hashes "${bundles[0]}"
 performer inspect --json "${bundles[0]}" | python3 -c 'import json, sys; doc = json.load(sys.stdin); assert doc["pmu"]["mode"] == "basic"'
+
+performer collect-perf --help >/dev/null
+PYTHONPATH=/usr/share/performer/collector python3 -c 'from performer.provenance import tool_versions; v=tool_versions(); assert len(v["performer_source_sha256"]) == 64; print(v)'

@@ -36,7 +36,10 @@ def format_ts(when: _dt.datetime) -> str:
     """RFC 3339 with a literal Z, which is what the schema demands."""
     if when.tzinfo is None:
         when = when.replace(tzinfo=_dt.timezone.utc)
-    return when.astimezone(_dt.timezone.utc).strftime(TS_FORMAT)
+    utc = when.astimezone(_dt.timezone.utc)
+    if utc.microsecond:
+        return utc.isoformat(timespec="microseconds").replace("+00:00", "Z")
+    return utc.strftime(TS_FORMAT)
 
 
 def parse_ts(text: str) -> _dt.datetime:
@@ -66,7 +69,7 @@ class ProbeResult:
 
     name: str
     status: str = "ok"
-    events_lost: int = 0
+    events_lost: Optional[int] = 0
     warnings: List[str] = field(default_factory=list)
     duration_s: Optional[float] = None
     exit_reason: Optional[str] = None
@@ -78,9 +81,10 @@ class ProbeResult:
         doc: Dict[str, Any] = {
             "name": self.name,
             "status": self.status,
-            "events_lost": self.events_lost,
             "warnings": list(self.warnings),
         }
+        if self.events_lost is not None:
+            doc["events_lost"] = self.events_lost
         if self.duration_s is not None:
             doc["duration_s"] = self.duration_s
         if self.exit_reason is not None:
