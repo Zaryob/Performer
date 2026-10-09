@@ -98,3 +98,26 @@ Debian filenames/versions include the source content fingerprint and Ubuntu
 release. The viewer footer includes its version and a deterministic source
 fingerprint that matches local and Docker builds. The Overview shows collector
 identity as well, so a stale viewer or mismatched capture can be identified.
+
+## Final integrated PMU check — 2026-10-10 (Istanbul)
+
+A 16-worker target (17 inventoried threads including main) was recorded for
+exactly 5.000 s with all six standard probes plus basic PMU counters. Every
+standard probe certified the window; PMU status was `ok` with 17 measured
+threads. Seven executable mappings and 194 original on-CPU stack records were
+retained, including available module build IDs. On-CPU folded output contained
+622 samples with 15.9% unknown frame occurrences. Schema/hash validation passed.
+The probe processes lived roughly 18.7 s including attachment and map dumping;
+that is not the 5 s capture duration.
+
+The PMU enable batch ran 0.223–0.963 ms after capture start, and the disable
+batch 0.117–0.834 ms after capture end. These measured ranges are displayed in
+the viewer; counters are not claimed to switch atomically across all threads.
+
+Module build IDs are now checked against the mapped device/inode. Deleted
+mappings use `/proc/<pid>/map_files`; an inaccessible or replaced binary remains
+unknown. Native perf loss counts come from recorded `LOST` / `LOST_SAMPLES`
+events. Unsupported/truncated framing remains unknown, not zero, and marks the
+capture partial. Layout references:
+[perf file header](https://github.com/torvalds/linux/blob/v6.12/tools/perf/util/header.h),
+[perf record definitions](https://github.com/torvalds/linux/blob/v6.12/tools/lib/perf/include/perf/event.h).
