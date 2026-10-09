@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 from performer import layout, preflight, profiles
 from performer.bundle import Bundle, BundleBuilder
-from performer.collect import CollectOptions, _launch_probes, collect
+from performer.collect import CollectOptions, _collection_cleanup, _launch_probes, collect
 from performer.errors import PerformerError, PreflightError
 
 from .support import fake_bpftrace, requires_target, spawn_target
@@ -35,6 +35,36 @@ def quiet(_message: str) -> None:
 
 
 class ProbeLaunchTests(unittest.TestCase):
+    def test_a_later_program_error_stops_already_started_probes(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as tmp:
+            builder = BundleBuilder(Path(tmp), label="launch-error")
+            specs = (profiles.ONCPU, profiles.ProbeSpec("wakeup", "wakeup.bt"))
+            profile = profiles.Profile("unit", "two probes", specs, 600, "unknown")
+            report = preflight.PreflightReport(smoke={"oncpu": True, "wakeup": True})
+            options = CollectOptions(pid=42, label="launch-error", out_dir=Path(tmp))
+            first = Mock()
+            with patch("performer.collect.ProbeProcess", return_value=first), patch(
+                "performer.collect.profiles.probe_command",
+                side_effect=[["bpftrace", "oncpu.bt"], PerformerError("bad program")],
+            ), patch("performer.collect.stop_all") as stop:
+                with self.assertRaisesRegex(PerformerError, "bad program"):
+                    _launch_probes(builder, profile, report, options, quiet)
+            first.start.assert_called_once()
+            stop.assert_called_once_with([first])
+
+    def test_snapshot_failure_cleans_up_every_running_resource(self):
+        from unittest.mock import Mock
+        watcher, sampler, probe, control = Mock(), Mock(), Mock(), Mock()
+        with patch("performer.collect.stop_all") as stop:
+            with self.assertRaisesRegex(OSError, "snapshot failed"):
+                with _collection_cleanup([(profiles.ONCPU, probe)], watcher, sampler, control):
+                    raise OSError("snapshot failed")
+        sampler.stop.assert_called_once()
+        watcher.stop.assert_called_once()
+        stop.assert_called_once_with([probe])
+        control.unlink.assert_called_once_with(missing_ok=True)
+
     def test_watchdog_includes_the_other_probes_attach_window(self):
         with tempfile.TemporaryDirectory() as tmp:
             builder = BundleBuilder(Path(tmp), label="watchdog")
@@ -185,6 +215,14 @@ class CollectTests(unittest.TestCase):
         self.assertEqual(probe["outputs"], [layout.STACK_ONCPU])
         self.assertEqual(probe["events_lost"], 0)
         self.assertEqual(probe["thresholds"], {"sample_hz": 99})
+        self.assertEqual(probe["duration_s"], result.manifest["actual_duration_s"])
+        from performer.manifest import parse_ts
+        delta = parse_ts(result.manifest["ended_at"]) - parse_ts(result.manifest["started_at"])
+        self.assertAlmostEqual(delta.total_seconds(), result.manifest["actual_duration_s"], places=3)
+        with Bundle.open(result.archive) as bundle:
+            timing = bundle.read_json(layout.META_WINDOW)
+            self.assertEqual(timing["end_ns"] - timing["start_ns"], 1_000_000_000)
+            self.assertEqual(timing["warnings"], [])
 
     def test_selected_oncpu_frequency_is_used_and_recorded(self):
         with spawn_target(threads=8, seconds=60) as target, fake_bpftrace("normal"):

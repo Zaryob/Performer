@@ -354,12 +354,29 @@ banner alone does not establish that the probe has finished loading.
 An unconfirmed startup times out and is stopped with a recorded error.
 All probes receive SIGINT together at the end of the collection window.
 
-The maps can also contain events between an individual probe attaching and
-the last probe becoming ready. Their windows overlap but are not exactly
-identical. `probes[].duration_s` records each process's lifetime, including
-compilation, attachment, and final map printing; it is not the active tracing
-duration. `manifest.duration_s` records the requested collection window (or
-the observed duration for `--until-exit`).
+New captures keep data handlers closed during attachment. The collector arms
+every survivor with identical future CLOCK_BOOTTIME bounds through a private
+`prctl` tracepoint and checks each acknowledgement, including its kernel clock.
+Events are accepted in the half-open interval `[start_ns, end_ns)`. Readiness,
+control and watchdog handlers remain active outside that interval. Cancellation
+arms an earlier future end; final sealing bounds observed pending off-CPU waits
+before map printing. No stack is invented for a thread already sleeping before
+the common start.
+
+The optional `meta/window.json` records canonical bounds, certification,
+per-probe process lifetimes and completion, and the actual ranges in which
+endpoint snapshots and PMU enable/disable batches ran. PMU ioctls and `/proc`
+reads are sequential: their ranges expose the offset from the common eBPF
+window rather than asserting simultaneous counter activation on every thread.
+Failure to certify a closing boundary degrades the run. An independently
+exiting probe remains partial and its duration uses the last observed witness.
+
+`manifest.started_at` and `ended_at` now describe collection, retain fractional
+UTC seconds and exclude attachment and printing. `probes[].duration_s` is the
+observed tracing duration (the last 100 ms witness for an early exit), while
+`manifest.duration_s` is requested duration. Bundles without window metadata
+may include a leading attachment interval and process-lifetime probe durations;
+those older measurements cannot be made precise retroactively.
 
 ## Compatibility
 

@@ -38,6 +38,7 @@ BUNDLE_DIRS: Tuple[str, ...] = (
 META_SYSTEM = f"{DIR_META}/system.json"
 META_TARGET = f"{DIR_META}/target.json"
 META_THREADS = f"{DIR_META}/threads.json"
+META_WINDOW = f"{DIR_META}/window.json"
 
 # stacks/ -- FlameGraph "folded" format: "frame;frame;frame <value>"
 STACK_ONCPU = f"{DIR_STACKS}/oncpu.folded"

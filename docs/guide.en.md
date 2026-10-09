@@ -108,10 +108,12 @@ stopping probes after 30.0s (duration)
 status:        ok
 ```
 
-Every probe starts before any of them is waited on, and they are all SIGINTed
-at the same instant, so the window the manifest records is the window they all
-actually covered — otherwise the first probe would trace seconds the last one
-missed.
+Probes attach concurrently but their data handlers stay closed. After every
+survivor reports readiness, the collector arms identical future start/end
+timestamps and verifies acknowledgements. Those timestamp predicates define
+the shared eBPF window; SIGINT later prints the maps. `meta/window.json` also
+records the offset of sequential `/proc` snapshots and PMU enable/disable
+batches. Older bundles without that metadata may include attachment time.
 
 Preflight reports probe startup failures as warnings and collects with the
 probes that passed. The bundle is marked partial and records failed probes.

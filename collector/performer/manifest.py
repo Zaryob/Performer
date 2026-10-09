@@ -36,7 +36,10 @@ def format_ts(when: _dt.datetime) -> str:
     """RFC 3339 with a literal Z, which is what the schema demands."""
     if when.tzinfo is None:
         when = when.replace(tzinfo=_dt.timezone.utc)
-    return when.astimezone(_dt.timezone.utc).strftime(TS_FORMAT)
+    utc = when.astimezone(_dt.timezone.utc)
+    if utc.microsecond:
+        return utc.isoformat(timespec="microseconds").replace("+00:00", "Z")
+    return utc.strftime(TS_FORMAT)
 
 
 def parse_ts(text: str) -> _dt.datetime:
