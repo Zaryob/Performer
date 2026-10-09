@@ -1,0 +1,11 @@
+> performer-viewer@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.10 <workspace>/work/repos/Zaryob--Performer/viewer
+
+
+ Test Files  8 passed | 1 skipped (9)
+      Tests  117 passed | 1 skipped (118)
+   Start at  01:30:22
+   Duration  16.66s (transform 27.37s, setup 0ms, import 40.58s, tests 4.00s, environment 46ms)

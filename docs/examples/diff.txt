@@ -1,0 +1,65 @@
+A  steady  20261008T223929Z-steady  [ok]
+B  heavy  20261008T223929Z-heavy  [ok]
+
+   duration   60 s -> 90 s      profile  standard -> standard
+   threads    315 -> 315 at start,  315 -> 315 at end
+
+oncpu  (17,109 -> 39,537 samples, compared as share of each run)
+   60 paths compared; 19.09% grew, 19.09% shrank
+
+          A         B      delta     rel  call path (leaf last)
+      3.63%     5.30%     +1.67%    +46%  ...m();__lll_lock_wait;std::_Rb_tree_increment(std::_Rb_tree_node_base const*)
+      4.29%     5.92%     +1.63%    +38%  ...erThread::run();TimerWheel::tick();TimerWheel::arm();__lll_lock_wait;memcpy
+      7.05%     5.45%     -1.61%    -23%  ...un();UserLogic::onEvent();UserLogic::compute();__memmove_avx_unaligned_erms
+      3.79%     5.30%     +1.51%    +40%  ...ad;WorkerThread::run();TimerWheel::tick();TimerWheel::arm();__lll_lock_wait
+      6.46%     5.03%     -1.43%    -22%  ...gic::onEvent();UserLogic::compute();operator new(unsigned long);_int_malloc
+      0.00%     1.42%     +1.42%     new  ...t_malloc;arena_get2;std::_Rb_tree_increment(std::_Rb_tree_node_base const*)
+      3.47%     2.10%     -1.36%    -39%  start_thread;WorkerThread::run();TimerWheel::tick();TimerWheel::insertDelta()
+      4.58%     5.94%     +1.36%    +30%  ...heel::tick();TimerWheel::arm();__lll_lock_wait;__memmove_avx_unaligned_erms
+      6.04%     4.71%     -1.33%    -22%  ...serLogic::compute();std::_Rb_tree_increment(std::_Rb_tree_node_base const*)
+      0.00%     1.29%     +1.29%     new  ...Queue::push();EventQueue::grow();operator new;_int_malloc;arena_get2;memcpy
+      3.28%     4.56%     +1.28%    +39%  ..._wait;std::vector<int, std::allocator<int> >::_M_realloc_insert(int const&)
+      0.00%     1.25%     +1.25%     new  ..._get2;std::vector<int, std::allocator<int> >::_M_realloc_insert(int const&)
+      4.00%     5.19%     +1.19%    +30%  ...);TimerWheel::arm();__lll_lock_wait;operator new(unsigned long);_int_malloc
+      3.19%     2.01%     -1.17%    -37%  ...ead;WorkerThread::run();TimerWheel::tick();TimerWheel::insertDelta();memcpy
+      2.58%     1.56%     -1.01%    -39%  ...heel::insertDelta();std::_Rb_tree_increment(std::_Rb_tree_node_base const*)
+      2.38%     1.40%     -0.98%    -41%  ...);TimerWheel::tick();TimerWheel::insertDelta();__memmove_avx_unaligned_erms
+      4.80%     3.85%     -0.95%    -20%  ...thread;WorkerThread::run();UserLogic::onEvent();UserLogic::compute();memcpy
+      5.16%     4.26%     -0.90%    -18%  start_thread;WorkerThread::run();UserLogic::onEvent();UserLogic::compute()
+      2.13%     1.31%     -0.83%    -39%  ...lta();std::vector<int, std::allocator<int> >::_M_realloc_insert(int const&)
+      2.01%     1.21%     -0.80%    -40%  ...l::tick();TimerWheel::insertDelta();operator new(unsigned long);_int_malloc
+
+   only in B (new call paths): 12
+      1.42%                               ...t_malloc;arena_get2;std::_Rb_tree_increment(std::_Rb_tree_node_base const*)
+      1.29%                               ...Queue::push();EventQueue::grow();operator new;_int_malloc;arena_get2;memcpy
+      1.25%                               ..._get2;std::vector<int, std::allocator<int> >::_M_realloc_insert(int const&)
+      0.71%                               ...);EventQueue::push();EventQueue::grow();operator new;_int_malloc;arena_get2
+      0.67%                               ...ue::grow();operator new;_int_malloc;arena_get2;__memmove_avx_unaligned_erms
+      0.64%                               ...operator new;_int_malloc;arena_get2;operator new(unsigned long);_int_malloc
+      0.46%                               ...::run();Backpressure::throttle();clock_gettime;__memmove_avx_unaligned_erms
+      0.45%                               start_thread;WorkerThread::run();Backpressure::throttle();clock_gettime;memcpy
+      0.42%                               start_thread;WorkerThread::run();Backpressure::throttle();clock_gettime
+      0.41%                               ...tle();clock_gettime;std::_Rb_tree_increment(std::_Rb_tree_node_base const*)
+
+threads by name (per second of run; tids are not stable across runs)
+         threads          CPU ms/s         runq ms/s  name
+       1 -> 1         8.6 -> 5.7         1.2 -> 0.8      Watchdog38
+       1 -> 1         4.4 -> 2.9         0.8 -> 0.5      event-disp39
+       1 -> 1        14.5 -> 9.7         0.5 -> 0.4      TimerWheel39
+       1 -> 1         2.4 -> 1.6         0.3 -> 0.2      TimerWheel18
+       1 -> 1         6.0 -> 4.0         0.3 -> 0.2      sched-worker5
+       1 -> 1         2.4 -> 1.6         0.3 -> 0.2      CanBus30
+       1 -> 1         2.8 -> 1.8         0.3 -> 0.2      SerialLink10
+       1 -> 1         2.3 -> 1.5         0.3 -> 0.2      Watchdog3
+       1 -> 1         3.9 -> 2.6         0.3 -> 0.2      CanBus12
+       1 -> 1         1.9 -> 1.3         0.3 -> 0.2      sched-worker29
+       1 -> 1         6.3 -> 4.2         0.3 -> 0.2      IoReactor37
+       1 -> 1         3.2 -> 2.2         0.3 -> 0.2      event-disp15
+       1 -> 1         2.2 -> 1.5         0.3 -> 0.2      SerialLink32
+       1 -> 1         1.2 -> 0.8         0.3 -> 0.2      Watchdog13
+       1 -> 1         1.1 -> 0.7         0.3 -> 0.2      CanBus27
+       1 -> 1         6.4 -> 4.3         0.3 -> 0.2      TimerWheel8
+       1 -> 1         4.0 -> 2.7         0.3 -> 0.2      IoReactor30
+       1 -> 1         0.7 -> 0.5         0.3 -> 0.2      Telemetry26
+       1 -> 1         5.2 -> 3.5         0.3 -> 0.2      IoReactor19
+       1 -> 1         2.3 -> 1.5         0.3 -> 0.2      sched-worker12
