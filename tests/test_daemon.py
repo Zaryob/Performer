@@ -26,7 +26,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from performer import daemon, layout, profiles
 
-from .support import python_sleeper, wait_until
+from .support import python_sleeper, reap, wait_until
 
 
 class Client:
@@ -173,7 +173,7 @@ class AuthTests(DaemonTestCase):
 
     def test_a_collection_cannot_be_started_without_a_token(self):
         target = python_sleeper()
-        self.addCleanup(target.kill)
+        self.addCleanup(reap, target)
         status, _ = self.client.request(
             "POST", "/api/collect", token=None,
             body={"pid": target.pid, "profile": "light", "label": "x"},
@@ -208,7 +208,7 @@ class ShellMetacharacterTests(DaemonTestCase):
 
     def test_hostile_labels_are_rejected(self):
         target = python_sleeper()
-        self.addCleanup(target.kill)
+        self.addCleanup(reap, target)
         for label in self.HOSTILE:
             with self.subTest(label=label):
                 status, body = self.client.request(
@@ -222,7 +222,7 @@ class ShellMetacharacterTests(DaemonTestCase):
 
     def test_hostile_tags_are_rejected(self):
         target = python_sleeper()
-        self.addCleanup(target.kill)
+        self.addCleanup(reap, target)
         for tag in self.HOSTILE:
             with self.subTest(tag=tag):
                 status, _ = self.client.request(
@@ -240,7 +240,7 @@ class ShellMetacharacterTests(DaemonTestCase):
 
     def test_a_profile_name_is_never_a_path_or_a_command(self):
         target = python_sleeper()
-        self.addCleanup(target.kill)
+        self.addCleanup(reap, target)
         for profile in (
             "light; id",
             "../../../etc/passwd",
@@ -264,7 +264,7 @@ class ShellMetacharacterTests(DaemonTestCase):
         # punctuation there would be security theatre.  The length cap is
         # real: it bounds what a client can make the daemon hold.
         target = python_sleeper()
-        self.addCleanup(target.kill)
+        self.addCleanup(reap, target)
         status, _ = self.client.request(
             "POST",
             "/api/collect",
@@ -417,7 +417,7 @@ class HostAndOriginTests(DaemonTestCase):
 
     def test_a_cross_origin_post_is_refused(self):
         target = python_sleeper()
-        self.addCleanup(target.kill)
+        self.addCleanup(reap, target)
         status, body = self.client.request(
             "POST",
             "/api/collect",
@@ -430,7 +430,7 @@ class HostAndOriginTests(DaemonTestCase):
 
     def test_the_daemons_own_origin_is_accepted(self):
         target = python_sleeper()
-        self.addCleanup(target.kill)
+        self.addCleanup(reap, target)
         status, _ = self.client.request(
             "POST",
             "/api/collect",
@@ -529,7 +529,7 @@ class ProfileWhitelistTests(DaemonTestCase):
         # this daemon has simply been told not to run it.
         self.assertIn("standard", profiles.available())
         target = python_sleeper()
-        self.addCleanup(target.kill)
+        self.addCleanup(reap, target)
         status, body = self.client.request(
             "POST", "/api/collect",
             body={"pid": target.pid, "profile": "standard", "label": "ok"},
@@ -542,7 +542,7 @@ class ProfileWhitelistTests(DaemonTestCase):
 class CollectTests(DaemonTestCase):
     def start(self, **overrides):
         target = python_sleeper()
-        self.addCleanup(target.kill)
+        self.addCleanup(reap, target)
         body = {"pid": target.pid, "profile": "light", "label": "ok", "duration_s": 5}
         body.update(overrides)
         return self.client.request("POST", "/api/collect", body=body)
@@ -696,7 +696,7 @@ class StatusTests(DaemonTestCase):
 
     def test_targets_are_read_from_proc_and_never_executed(self):
         target = python_sleeper()
-        self.addCleanup(target.kill)
+        self.addCleanup(reap, target)
         self.assertTrue(wait_until(lambda: _alive(target.pid), timeout=5))
         status, body = self.client.request("GET", "/api/targets")
         self.assertEqual(status, 200)

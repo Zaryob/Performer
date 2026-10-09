@@ -17,6 +17,7 @@ from .support import (
     fake_bpftrace,
     launcher_chain,
     python_sleeper,
+    reap,
     requires_target,
     spawn_target,
     wait_until,
@@ -76,7 +77,7 @@ class IndividualCheckTests(unittest.TestCase):
     def test_a_plain_process_is_not_a_launcher(self):
         child = python_sleeper(30)
         self.addCleanup(child.wait)
-        self.addCleanup(child.kill)
+        self.addCleanup(reap, child)
         check = preflight.check_target(preflight.PreflightReport(), child.pid)
         self.assertEqual(check.status, preflight.PASS)
 
