@@ -141,7 +141,7 @@ export function Overview({ bundle }: { bundle: Bundle }) {
                   <StatusBadge status={probe.status} />
                 </td>
                 <td className="py-1.5 pr-3 text-right tabular-nums text-slate-300">
-                  {(probe.events_lost ?? 0).toLocaleString()}
+                  {probe.events_lost === undefined ? "unknown" : probe.events_lost.toLocaleString()}
                 </td>
                 <td className="py-1.5 pr-3 font-mono text-xs text-slate-400">
                   {probe.thresholds

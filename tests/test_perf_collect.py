@@ -29,6 +29,8 @@ class NativeEvidenceTests(unittest.TestCase):
                     struct.pack_into(endian + ('Q' if wide else 'I'), program, 32 if wide else 16, len(note))
                     file.write_bytes(header + program + bytes(128 - 64 - len(program)) + note)
                     self.assertEqual(symbols.elf_build_id(file), 'abcd1234')
+                    self.assertIsNone(symbols.elf_build_id(file, inode=file.stat().st_ino + 1))
+                    self.assertIsNone(symbols.elf_build_id(file, device=file.stat().st_dev + 1))
                     file.write_bytes(file.read_bytes()[:-2])
                     self.assertIsNone(symbols.elf_build_id(file))
             file.write_bytes(b'not ELF')
@@ -43,7 +45,7 @@ class NativeEvidenceTests(unittest.TestCase):
         self.assertEqual(rows[0]['file_offset'], '0x1000')
         self.assertEqual(rows[0]['path'], '/opt/my app (deleted)')
         self.assertEqual(rows[0]['build_id'], 'abc')
-        identity.assert_called_once_with(Path('/proc/42/root/opt/my app'))
+        identity.assert_called_once_with(Path('/proc/42/map_files/1000-2000'), inode=7, device=os.makedev(8, 1))
 
     def test_raw_stack_symbols_offsets_and_addresses_survive_folding(self):
         text = '@cpu[\n    work+0x15 (/opt/app)\n    0xdeadbeef\n, worker, 42]: 3\n'
@@ -102,3 +104,35 @@ class PerfCaptureTests(unittest.TestCase):
         finally:
             for fd in (ctl_read, ctl_write, ack_read, ack_write):
                 os.close(fd)
+
+
+class PerfLossTests(unittest.TestCase):
+    def test_lost_records_and_lost_samples_count_payloads_in_both_endians(self):
+        from performer.parse.perf_data import recorded_loss
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'perf.data'
+            for endian, magic in (('<', b'PERFILE2'), ('>', b'2ELIFREP')):
+                header = bytearray(72)
+                header[:8] = magic
+                records = struct.pack(endian+'IHHQQ', 2, 0, 24, 123, 7) + struct.pack(endian+'IHHQ', 13, 0, 16, 11)
+                struct.pack_into(endian+'QQ', header, 40, 72, len(records))
+                path.write_bytes(header+records)
+                self.assertEqual(recorded_loss(path), 18)
+                path.write_bytes((header+records)[:-1])
+                self.assertIsNone(recorded_loss(path))
+
+    def test_complete_empty_recording_has_zero_loss_but_bad_framing_is_unknown(self):
+        from performer.parse.perf_data import recorded_loss
+        from performer.manifest import ProbeResult
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'perf.data'
+            header = bytearray(72)
+            header[:8] = b'PERFILE2'
+            struct.pack_into('<QQ', header, 40, 72, 0)
+            path.write_bytes(header)
+            self.assertEqual(recorded_loss(path), 0)
+            for kind, size in ((81, 8), (71, 8), (2, 8), (9, 0)):
+                struct.pack_into('<QQ', header, 40, 72, 8)
+                path.write_bytes(header+struct.pack('<IHH', kind, 0, size))
+                self.assertIsNone(recorded_loss(path))
+            self.assertNotIn('events_lost', ProbeResult('oncpu', events_lost=None).to_dict())

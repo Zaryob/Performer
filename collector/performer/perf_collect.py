@@ -17,6 +17,7 @@ from .bundle import BundleBuilder
 from .collect import _interrupt_guard, _utc_for_clock
 from .errors import PerformerError, PreflightError
 from .parse.perf import parse_perf
+from .parse.perf_data import recorded_loss
 from .parse.stacks import MapEntry, OnCpuLayout, StackKey, fold_oncpu
 from .runner import ProbeProcess, TargetWatcher, scan_stderr, wait_for_run
 
@@ -131,6 +132,11 @@ def collect_perf(*, pid, label, out_dir, duration_s=20.0, oncpu_hz=99,
     samples, parse_warnings = parse_perf(exported.stdout)
     folded, stats, selected = fold_samples(samples, pid, start_ns, end_ns)
     stderr = scan_stderr(probe.read_stderr())
+    lost = recorded_loss(data)
+    if lost is None:
+        warnings.append("perf recording loss could not be determined; do not assume zero dropped samples")
+    elif lost:
+        warnings.append(f"perf recording contains {lost} lost events/samples; totals are a lower bound")
     warnings.extend(parse_warnings)
     warnings.extend(stderr.warnings)
     empty_chains = sum(not sample.frames for sample in selected)
@@ -138,7 +144,7 @@ def collect_perf(*, pid, label, out_dir, duration_s=20.0, oncpu_hz=99,
         warnings.append(f"{empty_chains} CPU samples had no callchain; these are not resolved stacks")
     if outcome.reason != "duration":
         warnings.append(f"perf capture ended early: {outcome.reason}")
-    status = "failed" if not folded else "partial" if empty_chains or parse_warnings or stderr.events_lost or stderr.has_errors or outcome.reason != "duration" else "ok"
+    status = "failed" if not folded else "partial" if lost is None or lost or empty_chains or parse_warnings or stderr.events_lost or stderr.has_errors or outcome.reason != "duration" else "ok"
     if probe.exit_info.reason in ("sigkill", "sigterm", "startup_error") or probe.exit_info.exit_code not in (0, -2, 130):
         status = "partial" if folded else "failed"
         warnings.append(f"perf exit {probe.exit_info.reason}, code {probe.exit_info.exit_code}")
@@ -173,7 +179,7 @@ def collect_perf(*, pid, label, out_dir, duration_s=20.0, oncpu_hz=99,
     document = manifest.build_manifest(label=label, profile="perf", duration_s=duration_s, actual_duration_s=round(elapsed, 6),
         started_at=started_at, ended_at=ended_at,
         target=manifest.TargetInfo(pid, str(target.get("comm") or "unknown"), len(threads_start), len(threads_end), target.get("cmdline"), target.get("exe")),
-        probes=[manifest.ProbeResult("oncpu", status=status, duration_s=elapsed, events_lost=stderr.events_lost,
+        probes=[manifest.ProbeResult("oncpu", status=status, duration_s=elapsed, events_lost=max(lost, stderr.events_lost) if lost is not None else None,
                   warnings=warnings, exit_reason=probe.exit_info.reason, exit_code=probe.exit_info.exit_code,
                   thresholds={"sample_hz": oncpu_hz, "unwinder": call_graph}, outputs=[layout.STACK_ONCPU])],
         quality=quality, tool_versions={**provenance.tool_versions(), "perf": version.stdout.strip(), "kernel": proc.system_info().get("kernel")},

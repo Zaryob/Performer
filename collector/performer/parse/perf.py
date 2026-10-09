@@ -86,4 +86,3 @@ def parse_perf(text: str):
                 current = None
                 inline = None
     return samples, warnings
-

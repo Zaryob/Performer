@@ -1,6 +1,7 @@
 """Preserve native module identity and original stack text for later resolution."""
 from __future__ import annotations
 
+import os
 import struct
 from pathlib import Path
 
@@ -9,10 +10,15 @@ from .parse import stacks
 from .parse.offcpu import parse_pending_offcpu
 
 
-def elf_build_id(path: Path):
+def elf_build_id(path: Path, *, inode=None, device=None):
     """Read GNU build-id notes from ELF32/64 without requiring binutils."""
     try:
         with path.open("rb") as stream:
+            identity = os.fstat(stream.fileno())
+            if inode is not None and identity.st_ino != inode:
+                return None
+            if device is not None and identity.st_dev != device:
+                return None
             header = stream.read(64)
             if len(header) < 52 or header[:4] != b"\x7fELF" or header[4] not in (1, 2) or header[5] not in (1, 2):
                 return None
@@ -61,12 +67,22 @@ def modules_snapshot(pid: int):
         try:
             start, end = (int(value, 16) for value in span.split("-"))
             file_offset = int(offset, 16)
-        except ValueError:
+            major, minor = (int(value, 16) for value in device.split(":"))
+            inode_number = int(inode)
+            mapped_device = os.makedev(major, minor)
+            if end <= start:
+                continue
+        except (ValueError, OverflowError):
             continue
         identity = (name, device, inode)
         if identity not in identities:
-            clean = name[:-10] if name.endswith(" (deleted)") else name
-            identities[identity] = elf_build_id(proc.proc_path(pid, "root", clean.lstrip("/"))) if clean.startswith("/") else None
+            if name.endswith(" (deleted)"):
+                # map_files names the mapped inode; a replacement at the original
+                # path must never be reported as the old module's build ID.
+                binary = proc.proc_path(pid, "map_files", span)
+            else:
+                binary = proc.proc_path(pid, "root", name.lstrip("/")) if name.startswith("/") else None
+            identities[identity] = elf_build_id(binary, inode=inode_number, device=mapped_device) if binary else None
         mappings.append({
             "path": name, "start": hex(start), "end": hex(end),
             "file_offset": hex(file_offset), "device": device, "inode": inode,
