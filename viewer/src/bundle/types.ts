@@ -46,6 +46,9 @@ export interface Quality {
     cpu_pct_during?: number;
     cpu_pct_after?: number;
     sample_window_s?: number;
+    other_cpu_cores_reference?: number;
+    settle_before_s?: number;
+    settle_after_s?: number;
   };
   ignore_quality?: boolean;
   notes?: string[];

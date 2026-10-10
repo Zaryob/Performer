@@ -171,6 +171,13 @@ after (`quality.overhead.cpu_pct_before` / `cpu_pct_after`; traced CPU is
 `cpu_pct_during`). Comparing before
 with after would compare two untraced states and always report roughly zero.
 Negative results clamp to zero — tracing cannot make the target cheaper.
+Both untraced samples wait first until the rest of the machine is back to the
+CPU level measured before any probe ran (`other_cpu_cores_reference`, waits in
+`settle_before_s` / `settle_after_s`, at most 10 s). After bpftrace exits the
+kernel frees its programs and maps on kworker threads; on a Pi 5 that took
+over a core for seconds and cut a lock-bound target to a quarter of its CPU,
+so a sample taken then is not untraced. If that level does not return the
+estimate is `null` with a note.
 An unavailable or unreliable version 2 estimate is `null`, never `0`. Some
 version 1 bundles wrote `0` in this case; readers use the accompanying quality
 note to distinguish it from a measured zero.

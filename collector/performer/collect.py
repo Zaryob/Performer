@@ -289,11 +289,18 @@ def _collect(
         )
     control_path.unlink(missing_ok=True)
 
+    after_settle = (
+        proc.wait_for_quiet(options.pid, report.quiet_reference_cores)
+        if options.overhead_window_s > 0 and report.quiet_reference_cores is not None
+        else None
+    )
     cpu_after = (
         proc.sample_cpu(options.pid, options.overhead_window_s)
         if options.overhead_window_s > 0
         else None
     )
+    if cpu_after is not None and after_settle is not None:
+        cpu_after.update(after_settle)
 
     # ---- turn probe output into bundle files -------------------------
     probe_results = _finish_probes(
@@ -530,12 +537,18 @@ class _interrupt_guard:
     The probes live in their own process groups, so a terminal Ctrl-C reaches
     only the collector.  That is deliberate: the collector must be the one to
     SIGINT bpftrace, in the right order, or the maps are never written.
+
+    SIGTERM -- ``kill``, ``timeout``, ``docker stop``, a service manager --
+    gets the same clean stop. Dying on it would leave every probe attached to
+    the target until its watchdog fired and lose the bundle.
     """
+
+    SIGNALS = (signal.SIGINT, signal.SIGTERM)
 
     def __init__(self, event: threading.Event, printer: Printer) -> None:
         self.event = event
         self.printer = printer
-        self._previous = None
+        self._previous: Dict[int, Any] = {}
 
     def __enter__(self) -> "_interrupt_guard":
         def _handler(_signum, _frame):
@@ -548,18 +561,20 @@ class _interrupt_guard:
                 )
             self.event.set()
 
-        try:
-            self._previous = signal.signal(signal.SIGINT, _handler)
-        except ValueError:  # pragma: no cover - not the main thread
-            self._previous = None
+        for signum in self.SIGNALS:
+            try:
+                self._previous[signum] = signal.signal(signum, _handler)
+            except ValueError:  # pragma: no cover - not the main thread
+                pass
         return self
 
     def __exit__(self, *exc_info: Any) -> None:
-        if self._previous is not None:
+        for signum, previous in self._previous.items():
             try:
-                signal.signal(signal.SIGINT, self._previous)
+                signal.signal(signum, previous)
             except ValueError:  # pragma: no cover
                 pass
+        self._previous = {}
 
 
 def _launch_probes(
@@ -749,6 +764,16 @@ def _build_quality(
         notes.append("frame pointer check overridden with --ignore-quality")
     if baseline_pct is None or baseline_pct <= 0 or during_pct is None:
         notes.append("overhead could not be estimated: CPU baseline or samples were unavailable")
+    unsettled = [
+        name for name, sample in (("before", report.cpu_before), ("after", cpu_after))
+        if sample and sample.get("settled") is False
+    ]
+    if unsettled:
+        notes.append(
+            "other CPU activity, such as the kernel tearing down probes, had not returned "
+            f"to its untraced level before the {' and '.join(unsettled)} sample; "
+            "the overhead estimate is unreliable"
+        )
     disagreement = proc.baseline_disagreement([report.cpu_before, cpu_after])
     if disagreement is not None and disagreement > 0.25:
         notes.append(
@@ -767,6 +792,11 @@ def _build_quality(
         if cpu_after and cpu_after.get("cpu_pct") is not None:
             overhead["cpu_pct_after"] = float(cpu_after["cpu_pct"])
         overhead["sample_window_s"] = options.overhead_window_s
+        if report.quiet_reference_cores is not None:
+            overhead["other_cpu_cores_reference"] = round(report.quiet_reference_cores, 3)
+        for name, sample in (("before", report.cpu_before), ("after", cpu_after)):
+            if sample and sample.get("settle_s") is not None:
+                overhead[f"settle_{name}_s"] = float(sample["settle_s"])
 
     total = report.total_frame_samples
     unknown = report.unknown_frame_samples
@@ -776,6 +806,7 @@ def _build_quality(
         and baseline_pct > 0
         and during_pct is not None
         and (disagreement is None or disagreement <= 0.25)
+        and not unsettled
     )
 
     return manifest_mod.Quality(

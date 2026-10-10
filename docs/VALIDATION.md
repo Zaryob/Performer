@@ -49,7 +49,30 @@ and DWARF evidence, viewer controls/quality, and build provenance.
   identity and original stack evidence retained; bundle hashes validated.
 
 Details, reproduction and limits: [perf validation](perf-validation.md).
-Concurrent profilers do not establish isolated collection overhead. The old
-ResourceWarnings in daemon test subprocess helpers remain visible in the native
-suite log. Browser visual verification was not performed. Broader workload and
-controlled overhead requirements in issue #8 remain open.
+Concurrent profilers do not establish isolated collection overhead; the
+controlled measurement below does. Browser visual verification was not performed.
+
+## Overhead and robustness — 2026-10-10 (Istanbul)
+
+Same Raspberry Pi 5 host. The native suite ran **549 tests, all passing
+(1 skipped)**, with no ResourceWarnings. The helper sleepers are now reaped.
+The viewer passed 133 tests, the type check and the build.
+
+- The two budget tests now skip with the collector's own note when a host
+  cannot measure overhead. A `None` estimate without a note fails. The
+  `TypeError` is gone.
+- [Alternating benchmark](validation/overhead-2026-10-10/README.md): 63 runs
+  covering CPU-, lock- and I/O-bound workloads, each untraced, under
+  Performer and under perf. All runs completed with no lost events.
+  Performer cost −0.2%, −1.9% and −0.1% throughput, and +0.1%, +10.1% and
+  +27.6% CPU per iteration.
+- The benchmark found three collector defects, now fixed:
+  - **futex:** an uncontended target's futex probe was disabled and the run
+    marked partial.
+  - **SIGTERM:** it left five bpftrace processes attached and no bundle.
+  - **Overhead self-estimate:** the "untraced" CPU samples fell inside kernel
+    probe teardown. The self-estimate is now 0.0% for cpu and 8.5% for lock
+    (measured 10.1%).
+
+Still open in issue #8: publishing verified sample bundles on a real release.
+That step is deliberately left to the maintainer.

@@ -9,7 +9,7 @@ from performer import layout, proc
 
 from unittest import mock
 
-from .support import launcher_chain, python_sleeper, requires_target, spawn_target, wait_until
+from .support import launcher_chain, python_sleeper, reap, requires_target, spawn_target, wait_until
 
 
 class SelfTests(unittest.TestCase):
@@ -119,11 +119,67 @@ class CpuTests(unittest.TestCase):
         )
 
 
+class QuietTests(unittest.TestCase):
+    """Untraced samples wait for the kernel to finish tearing tracing down."""
+
+    @staticmethod
+    def readers(others_per_slice, target_ticks_per_slice=0):
+        """Fake /proc readers: each call advances one slice of CPU use."""
+        busy, target = [0], [0]
+
+        def read_busy():
+            value = busy[0]
+            if others_per_slice:
+                busy[0] += others_per_slice.pop(0) + target_ticks_per_slice
+            return value
+
+        def read_target(_pid):
+            value = target[0]
+            target[0] += target_ticks_per_slice
+            return (value, 0)
+
+        return read_busy, read_target
+
+    def test_waits_until_other_cpu_returns_to_the_reference(self):
+        tick = proc.CLK_TCK
+        # 1.5, 1.2, then 0.1 cores of non-target work per 0.5 s slice.
+        busy, target = self.readers([int(0.75 * tick), int(0.6 * tick), int(0.05 * tick), 0])
+        slept = []
+        settled = proc.wait_for_quiet(
+            1, 0.1, slice_s=0.5, margin_cores=0.25, max_s=10,
+            sleep=slept.append, read_busy=busy, read_target=target,
+        )
+        self.assertEqual(settled, {"settle_s": 1.5, "settled": True})
+
+    def test_gives_up_and_says_so(self):
+        tick = proc.CLK_TCK
+        busy, target = self.readers([tick] * 10)
+        settled = proc.wait_for_quiet(
+            1, 0.0, slice_s=0.5, max_s=1.0, sleep=lambda _s: None,
+            read_busy=busy, read_target=target,
+        )
+        self.assertEqual(settled, {"settle_s": 1.0, "settled": False})
+
+    def test_the_target_itself_does_not_count_as_disturbance(self):
+        tick = proc.CLK_TCK
+        busy, target = self.readers([0, 0], target_ticks_per_slice=2 * tick)
+        settled = proc.wait_for_quiet(
+            1, 0.0, slice_s=0.5, sleep=lambda _s: None, read_busy=busy, read_target=target,
+        )
+        self.assertEqual(settled, {"settle_s": 0.5, "settled": True})
+
+    def test_unreadable_proc_is_not_reported_as_quiet(self):
+        settled = proc.wait_for_quiet(
+            1, 0.0, sleep=lambda _s: None, read_busy=lambda: None, read_target=lambda _p: None,
+        )
+        self.assertEqual(settled, {"settle_s": 0.0, "settled": False})
+
+
 class ChildTests(unittest.TestCase):
     def setUp(self):
         self.child = python_sleeper(30)
         self.addCleanup(self.child.wait)
-        self.addCleanup(self.child.kill)
+        self.addCleanup(reap, self.child)
 
     def test_children_are_listed(self):
         self.assertIn(self.child.pid, proc.child_pids(os.getpid()))

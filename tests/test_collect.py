@@ -478,6 +478,21 @@ class StandardProfileTests(unittest.TestCase):
         kwargs.update(overrides)
         return CollectOptions(**kwargs)
 
+    def _measured_overhead(self, result) -> float:
+        """The estimate, or a skip that says why this host could not measure it.
+
+        A missing estimate is not a passing budget: a busy or restricted host
+        reports ``None`` with a note, and the test must surface that rather
+        than compare ``None`` with a number or treat it as zero.
+        """
+        quality = result.manifest["quality"]
+        overhead = quality["estimated_overhead_pct"]
+        if overhead is None:
+            reasons = [note for note in quality.get("notes", []) if "overhead" in note]
+            self.assertTrue(reasons, "overhead is missing without a quality note explaining why")
+            self.skipTest(f"{result.manifest['label']}: overhead not measured: " + "; ".join(reasons))
+        return overhead
+
     def test_every_probe_in_the_profile_delivers(self):
         with spawn_target(threads=32, seconds=90) as target, fake_bpftrace("normal"):
             result = collect(self._options(target.pid), printer=quiet)
@@ -507,6 +522,20 @@ class StandardProfileTests(unittest.TestCase):
         with Bundle.open(result.archive) as bundle:
             self.assertTrue(bundle.validate().ok)
             self.assertEqual(bundle.read_json(layout.HIST_THREADLIFE)["rows"], [])
+
+    def test_uncontended_target_keeps_futex_and_run_ok(self):
+        """No lock contention is a measurement, not a broken probe."""
+        with spawn_target(threads=8, seconds=90) as target, fake_bpftrace("futex_silent"):
+            result = collect(self._options(target.pid), printer=quiet)
+
+        self.assertEqual(result.preflight.get("smoke:futex").status, "pass")
+        probe = next(p for p in result.manifest["probes"] if p["name"] == "futex")
+        self.assertEqual(probe["status"], "ok")
+        self.assertTrue(any("no contended futex waits" in w for w in probe["warnings"]), probe["warnings"])
+        self.assertEqual(result.manifest["status"], "ok")
+        with Bundle.open(result.archive) as bundle:
+            self.assertTrue(bundle.validate().ok)
+            self.assertEqual(bundle.read_json(layout.HIST_FUTEX_BY_ADDR)["rows"], [])
 
     def test_threadlife_with_events_can_be_the_only_probe(self):
         profile = profiles.Profile(
@@ -570,7 +599,7 @@ class StandardProfileTests(unittest.TestCase):
                 self._options(target.pid, duration_s=8.0, overhead_window_s=3.0),
                 printer=quiet,
             )
-        overhead = result.manifest["quality"]["estimated_overhead_pct"]
+        overhead = self._measured_overhead(result)
         self.assertLess(overhead, 15.0, f"estimated overhead {overhead}%")
 
     def test_overhead_is_not_inflated_by_probe_startup(self):
@@ -598,7 +627,7 @@ class StandardProfileTests(unittest.TestCase):
         standard_probes = len(many.manifest["probes"])
         self.assertGreater(standard_probes, light_probes)
         for result in (one, many):
-            overhead = result.manifest["quality"]["estimated_overhead_pct"]
+            overhead = self._measured_overhead(result)
             self.assertLess(overhead, 25.0, f"{result.manifest['label']}: {overhead}%")
 
     def test_target_killed_mid_run_leaves_a_partial_but_readable_bundle(self):
@@ -725,3 +754,26 @@ class InterruptGuardTests(unittest.TestCase):
         self.assertEqual(len(messages), 2)
         self.assertIn("interrupted", messages[0])
         self.assertIn("already stopping", messages[1])
+
+    def test_sigterm_stops_cleanly_instead_of_orphaning_the_probes(self):
+        """kill, timeout and service managers send SIGTERM, not Ctrl-C.
+
+        Dying on it would leave every bpftrace attached to the target until
+        its watchdog fires, and lose the bundle.
+        """
+        import os
+        import signal
+        import threading
+        import time
+
+        from performer.collect import _interrupt_guard
+
+        before = signal.getsignal(signal.SIGTERM)
+        event = threading.Event()
+        messages = []
+        with _interrupt_guard(event, messages.append):
+            os.kill(os.getpid(), signal.SIGTERM)
+            time.sleep(0.05)
+        self.assertTrue(event.is_set())
+        self.assertIn("interrupted", messages[0])
+        self.assertIs(signal.getsignal(signal.SIGTERM), before)

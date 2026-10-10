@@ -400,7 +400,9 @@ of refusals:
 
 Cancelling a run is not a kill: it sets the same event Ctrl-C does, so the
 probes are still SIGINTed in order and the bundle is still written. A
-cancelled run is a short run, not a lost one.
+cancelled run is a short run, not a lost one. The CLI treats SIGTERM (`kill`,
+`timeout`, `docker stop`, a service manager) the same way during collection,
+so stopping it does not leave probes attached until their watchdog fires.
 
 `tests/test_daemon.py` drives a real server on a real socket for each of
 these, including the four the milestone names — shell metacharacters, path

@@ -144,6 +144,18 @@ def python_sleeper(seconds: float = 30.0) -> subprocess.Popen:
     )
 
 
+def reap(process: subprocess.Popen) -> None:
+    """Kill a helper child and collect its exit status.
+
+    A killed child that is never waited for stays a zombie, and its Popen
+    object warns ("subprocess N is still running") when it is collected.
+    """
+    if process.poll() is None:
+        process.kill()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=5)
+
+
 def launcher_chain(seconds: float = 30.0) -> subprocess.Popen:
     """sh -> sh -> python, like sudo -> sudo -> program under ``use_pty``.
 

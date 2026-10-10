@@ -15,7 +15,8 @@ Checks, in order (spec section 6.1):
   5. kernel.perf_event_paranoid
   6. frame pointer trial: a 2 second oncpu sample, measuring [unknown] frames
   7. per probe smoke test: empty output disables a probe, except a clean
-     threadlife trial (a stable thread pool has no fork/exit events)
+     trial of an event-driven probe: a stable thread pool has no fork/exit
+     events for threadlife, and an uncontended target no futex waits
 """
 
 from __future__ import annotations
@@ -94,10 +95,13 @@ class PreflightReport:
     #: probe name -> whether its smoke test found a usable probe
     smoke: Dict[str, bool] = field(default_factory=dict)
     #: probe name -> whether the trial actually produced map data. A clean,
-    #: empty threadlife trial is usable but cannot justify a run by itself.
+    #: empty event-driven trial is usable but cannot justify a run by itself.
     smoke_data: Dict[str, bool] = field(default_factory=dict)
     smoke_warnings: Dict[str, List[str]] = field(default_factory=dict)
     cpu_before: Optional[Dict[str, object]] = None
+    #: Cores the rest of the machine used before any trial probe ran: the
+    #: level untraced samples wait to return to after tracing is torn down.
+    quiet_reference_cores: Optional[float] = None
 
     def add(self, check: Check) -> Check:
         self.checks.append(check)
@@ -541,6 +545,17 @@ def check_frame_pointers(
     )
 
 
+#: How long the machine's untraced background CPU is sampled before trials.
+QUIET_REFERENCE_S = 0.5
+
+#: Probes that record only when the target does one specific thing. A clean,
+#: silent trial is an observation that it did not, not a broken probe.
+SILENT_OK_PROBES = {
+    "threadlife": "no thread creation or exit during trial",
+    "futex": "no contended futex wait above the threshold during trial",
+}
+
+
 def check_smoke(
     report: PreflightReport,
     profile: Profile,
@@ -549,7 +564,7 @@ def check_smoke(
     reuse: Optional[Dict[str, TrialResult]] = None,
     **kwargs,
 ) -> List[Check]:
-    """Run every probe briefly; accept silence only for a healthy threadlife probe.
+    """Run every probe briefly; accept silence only from a healthy event-driven probe.
 
     ``reuse`` maps a probe name to a trial that already ran it: the frame
     pointer trial is an oncpu run, and on a mostly idle target a second two
@@ -563,9 +578,9 @@ def check_smoke(
             trial = run_trial(
                 spec, pid, bpftrace=report.bpftrace_path or "bpftrace", **kwargs
             )
-        stderr_summary = scan_stderr(trial.stderr) if spec.name == "threadlife" else None
-        clean_threadlife = (
-            spec.name == "threadlife"
+        stderr_summary = scan_stderr(trial.stderr) if spec.name in SILENT_OK_PROBES else None
+        clean_silence = (
+            spec.name in SILENT_OK_PROBES
             and trial.ran
             and trial.map_entries == 0
             and bool(_ATTACH_BANNER_RE.search(trial.stdout))
@@ -578,14 +593,14 @@ def check_smoke(
             and not stderr_summary.has_errors
             and not stderr_summary.events_lost
         )
-        produced = trial.produced_data or clean_threadlife
+        produced = trial.produced_data or clean_silence
         report.smoke[spec.name] = produced
         report.smoke_data[spec.name] = trial.produced_data
         report.smoke_warnings[spec.name] = trial.warnings
         if produced:
             message = (
-                "probe 'threadlife' attached; no thread creation or exit during trial"
-                if clean_threadlife
+                f"probe '{spec.name}' attached; {SILENT_OK_PROBES[spec.name]}"
+                if clean_silence and not trial.produced_data
                 else f"probe '{spec.name}' attached and produced output"
             )
             checks.append(
@@ -713,6 +728,8 @@ def run_preflight(
             report.smoke_data[spec.name] = False
             report.add(Check(f"smoke:{spec.name}", SKIP, f"not run: {reason}"))
     else:
+        if overhead_window_s > 0:
+            report.quiet_reference_cores = proc.other_cpu_cores(pid, QUIET_REFERENCE_S, sleep=sleep)
         trial_kwargs = {
             "sleep": sleep,
             "seconds": trial_seconds,
@@ -732,8 +749,16 @@ def run_preflight(
 
     if overhead_window_s > 0:
         # Sampled last, so it measures the target as it is about to be traced
-        # rather than as it was before the trial probes ran.
+        # rather than as it was before the trial probes ran -- but only once
+        # the kernel has finished tearing the trial probes down.
+        settle = (
+            proc.wait_for_quiet(pid, report.quiet_reference_cores, sleep=sleep)
+            if report.quiet_reference_cores is not None
+            else None
+        )
         report.cpu_before = proc.sample_cpu(pid, overhead_window_s, sleep=sleep)
+        if report.cpu_before is not None and settle is not None:
+            report.cpu_before.update(settle)
 
     return report
 

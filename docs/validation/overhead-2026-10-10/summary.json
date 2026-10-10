@@ -1,0 +1,290 @@
+{
+  "cpu": {
+    "baseline": {
+      "throughput": {
+        "n": 7,
+        "median": 297606.4196005179,
+        "q1": 297117.7617588103,
+        "q3": 297613.5459679123,
+        "min": 296383.66893587005,
+        "max": 297767.21422727115
+      },
+      "cpu_us_per_iteration": {
+        "n": 7,
+        "median": 13.379992075015792,
+        "q1": 13.37709129586797,
+        "q3": 13.381714423241222,
+        "min": 13.372394347834149,
+        "max": 13.38314427137101
+      },
+      "failed_runs": [],
+      "events_lost_total": null,
+      "outside_window_s": null,
+      "self_estimate_pct": null,
+      "self_estimate_missing": 0
+    },
+    "performer": {
+      "throughput": {
+        "n": 7,
+        "median": 296979.30401962594,
+        "q1": 296877.966628139,
+        "q3": 297007.9299593537,
+        "min": 296309.9773194661,
+        "max": 297043.4813201761
+      },
+      "cpu_us_per_iteration": {
+        "n": 7,
+        "median": 13.391763101470554,
+        "q1": 13.390997952715125,
+        "q3": 13.393231737424706,
+        "min": 13.388674901770658,
+        "max": 13.394073259228652
+      },
+      "failed_runs": [],
+      "events_lost_total": 0,
+      "outside_window_s": {
+        "n": 7,
+        "median": 43.32226798600095,
+        "q1": 43.15213188549933,
+        "q3": 43.534028078996926,
+        "min": 42.993837851001445,
+        "max": 44.357175460998405
+      },
+      "self_estimate_pct": {
+        "n": 7,
+        "median": 0.0,
+        "q1": 0.0,
+        "q3": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "self_estimate_missing": 0,
+      "throughput_change_pct": -0.21071977604977254,
+      "cpu_per_iteration_change_pct": 0.08797483876497036
+    },
+    "perf": {
+      "throughput": {
+        "n": 7,
+        "median": 297452.42684164806,
+        "q1": 297281.1326793049,
+        "q3": 297479.9744232859,
+        "min": 297238.67057841795,
+        "max": 297505.6415519413
+      },
+      "cpu_us_per_iteration": {
+        "n": 7,
+        "median": 13.384704891729827,
+        "q1": 13.383777161058372,
+        "q3": 13.385794564453576,
+        "min": 13.38339966191891,
+        "max": 13.387403900354247
+      },
+      "failed_runs": [],
+      "events_lost_total": 0,
+      "outside_window_s": {
+        "n": 7,
+        "median": 2.5,
+        "q1": 2.5,
+        "q3": 2.5,
+        "min": 2.5,
+        "max": 2.5
+      },
+      "self_estimate_pct": null,
+      "self_estimate_missing": 0,
+      "throughput_change_pct": -0.05174376247546464,
+      "cpu_per_iteration_change_pct": 0.035222866258899366
+    }
+  },
+  "lock": {
+    "baseline": {
+      "throughput": {
+        "n": 7,
+        "median": 21719.72938672662,
+        "q1": 21715.14000420686,
+        "q3": 21721.849371310658,
+        "min": 21705.652593538158,
+        "max": 21725.51842903429
+      },
+      "cpu_us_per_iteration": {
+        "n": 7,
+        "median": 48.439144893467926,
+        "q1": 48.432084364838545,
+        "q3": 48.457294601660124,
+        "min": 48.415377313250495,
+        "max": 48.46530980144817
+      },
+      "failed_runs": [],
+      "events_lost_total": null,
+      "outside_window_s": null,
+      "self_estimate_pct": null,
+      "self_estimate_missing": 0
+    },
+    "performer": {
+      "throughput": {
+        "n": 7,
+        "median": 21307.8097315829,
+        "q1": 21294.729568783012,
+        "q3": 21310.332130601317,
+        "min": 21258.108070417285,
+        "max": 21318.059163009573
+      },
+      "cpu_us_per_iteration": {
+        "n": 7,
+        "median": 53.31064458877061,
+        "q1": 53.25518687002674,
+        "q3": 53.43563405604779,
+        "min": 53.208427720778644,
+        "max": 53.496382540082166
+      },
+      "failed_runs": [],
+      "events_lost_total": 0,
+      "outside_window_s": {
+        "n": 7,
+        "median": 38.30988386399986,
+        "q1": 38.09401803050059,
+        "q3": 38.45356419299969,
+        "min": 37.91855418900013,
+        "max": 38.639571894000255
+      },
+      "self_estimate_pct": {
+        "n": 7,
+        "median": 8.52,
+        "q1": 8.29,
+        "q3": 8.61,
+        "min": 8.1,
+        "max": 8.9
+      },
+      "self_estimate_missing": 0,
+      "throughput_change_pct": -1.8965229621850321,
+      "cpu_per_iteration_change_pct": 10.056948168710566
+    },
+    "perf": {
+      "throughput": {
+        "n": 7,
+        "median": 21682.088946793923,
+        "q1": 21650.867455459098,
+        "q3": 21685.75272364151,
+        "min": 21621.34346344587,
+        "max": 21689.58288330603
+      },
+      "cpu_us_per_iteration": {
+        "n": 7,
+        "median": 49.241731547652215,
+        "q1": 49.21091489471097,
+        "q3": 49.30345235952812,
+        "min": 49.1555940394266,
+        "max": 49.70655810605919
+      },
+      "failed_runs": [],
+      "events_lost_total": 0,
+      "outside_window_s": {
+        "n": 7,
+        "median": 2.5,
+        "q1": 2.5,
+        "q3": 2.5,
+        "min": 2.5,
+        "max": 2.5
+      },
+      "self_estimate_pct": null,
+      "self_estimate_missing": 0,
+      "throughput_change_pct": -0.17330068557713796,
+      "cpu_per_iteration_change_pct": 1.6568968257995031
+    }
+  },
+  "io": {
+    "baseline": {
+      "throughput": {
+        "n": 7,
+        "median": 2812.8327800230845,
+        "q1": 2776.996210410791,
+        "q3": 2907.545005689667,
+        "min": 2737.045871380181,
+        "max": 3009.9638488688474
+      },
+      "cpu_us_per_iteration": {
+        "n": 7,
+        "median": 18.162799541878318,
+        "q1": 17.950557870393794,
+        "q3": 19.883115586825234,
+        "min": 17.824296546740097,
+        "max": 21.99548428007245
+      },
+      "failed_runs": [],
+      "events_lost_total": null,
+      "outside_window_s": null,
+      "self_estimate_pct": null,
+      "self_estimate_missing": 0
+    },
+    "performer": {
+      "throughput": {
+        "n": 7,
+        "median": 2809.1384567823175,
+        "q1": 2769.2518482211985,
+        "q3": 2839.512334128197,
+        "min": 2737.352291320299,
+        "max": 2898.5771190568644
+      },
+      "cpu_us_per_iteration": {
+        "n": 7,
+        "median": 23.18199633012417,
+        "q1": 21.614814994127418,
+        "q3": 23.8046651085754,
+        "min": 21.163202288248524,
+        "max": 24.382167282992633
+      },
+      "failed_runs": [],
+      "events_lost_total": 0,
+      "outside_window_s": {
+        "n": 7,
+        "median": 37.723773052999604,
+        "q1": 37.57271063400003,
+        "q3": 37.923789669499456,
+        "min": 37.357711921999,
+        "max": 38.26167945999987
+      },
+      "self_estimate_pct": {
+        "n": 5,
+        "median": 22.0,
+        "q1": 22.0,
+        "q3": 24.0,
+        "min": 14.0,
+        "max": 24.0
+      },
+      "self_estimate_missing": 2,
+      "throughput_change_pct": -0.13133817505983636,
+      "cpu_per_iteration_change_pct": 27.634488706837267
+    },
+    "perf": {
+      "throughput": {
+        "n": 7,
+        "median": 2823.4047536415173,
+        "q1": 2759.796134166439,
+        "q3": 2889.1728050746847,
+        "min": 2742.495852329464,
+        "max": 3492.323002602381
+      },
+      "cpu_us_per_iteration": {
+        "n": 7,
+        "median": 22.205397530223056,
+        "q1": 21.322264035723514,
+        "q3": 24.597139867671103,
+        "min": 18.53158538424237,
+        "max": 25.407202804342205
+      },
+      "failed_runs": [],
+      "events_lost_total": 0,
+      "outside_window_s": {
+        "n": 7,
+        "median": 2.5,
+        "q1": 2.5,
+        "q3": 2.5,
+        "min": 2.5,
+        "max": 2.5
+      },
+      "self_estimate_pct": null,
+      "self_estimate_missing": 0,
+      "throughput_change_pct": 0.3758479243243906,
+      "cpu_per_iteration_change_pct": 22.257570915891243
+    }
+  }
+}
