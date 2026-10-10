@@ -215,7 +215,19 @@
             "cpu_pct_before": { "type": "number", "minimum": 0 },
             "cpu_pct_during": { "type": "number", "minimum": 0 },
             "cpu_pct_after": { "type": "number", "minimum": 0 },
-            "sample_window_s": { "type": "number", "minimum": 0 }
+            "sample_window_s": { "type": "number", "minimum": 0 },
+            "other_cpu_cores_reference": {
+              "description": "Cores used by everything except the target before any probe ran.",
+              "type": "number", "minimum": 0
+            },
+            "settle_before_s": {
+              "description": "Seconds waited for that level to return before the untraced before sample.",
+              "type": "number", "minimum": 0
+            },
+            "settle_after_s": {
+              "description": "Seconds waited for that level to return before the untraced after sample.",
+              "type": "number", "minimum": 0
+            }
           }
         },
         "ignore_quality": {

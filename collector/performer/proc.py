@@ -17,7 +17,7 @@ import resource
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import layout
 
@@ -373,6 +373,75 @@ def sample_cpu(pid: int, window_s: float, *, sleep=time.sleep) -> Optional[Dict[
         "stime_ticks": second[1] - first[1],
         "cpu_pct": round(100.0 * (used_ticks / CLK_TCK) / elapsed, 2),
     }
+
+
+def system_busy_ticks() -> Optional[int]:
+    """Non-idle CPU ticks across the whole machine, from ``/proc/stat``."""
+    text = _read_text(PROC / "stat")
+    if not text:
+        return None
+    fields = text.splitlines()[0].split()
+    if len(fields) < 9 or fields[0] != "cpu":
+        return None
+    try:
+        user, nice, system, _idle, _iowait, irq, softirq, steal = (int(v) for v in fields[1:9])
+    except ValueError:
+        return None
+    return user + nice + system + irq + softirq + steal
+
+
+def other_cpu_cores(
+    pid: int,
+    window_s: float,
+    *,
+    sleep=time.sleep,
+    read_busy: Callable[[], Optional[int]] = system_busy_ticks,
+    read_target: Callable[[int], Optional[Tuple[int, int]]] = cpu_ticks,
+) -> Optional[float]:
+    """CPU the rest of the machine used over ``window_s``, in cores."""
+    busy0, target0 = read_busy(), read_target(pid)
+    sleep(window_s)
+    busy1, target1 = read_busy(), read_target(pid)
+    if None in (busy0, busy1, target0, target1) or window_s <= 0:
+        return None
+    target = (target1[0] - target0[0]) + (target1[1] - target0[1])
+    return max(0.0, (busy1 - busy0 - target) / CLK_TCK / window_s)
+
+
+def wait_for_quiet(
+    pid: int,
+    reference_cores: float,
+    *,
+    slice_s: float = 0.5,
+    margin_cores: float = 0.25,
+    max_s: float = 10.0,
+    sleep=time.sleep,
+    read_busy: Callable[[], Optional[int]] = system_busy_ticks,
+    read_target: Callable[[int], Optional[Tuple[int, int]]] = cpu_ticks,
+) -> Dict[str, Any]:
+    """Wait until the machine is back to its untraced level of other work.
+
+    When bpftrace exits the kernel frees its programs, maps and perf events
+    on kworker threads, which can take more than a core for seconds. An
+    "untraced" CPU sample taken then reads the target low -- a lock-bound
+    target dropped to a quarter of its CPU on a Pi 5 -- and the overhead
+    estimate built on it is either inflated or discarded. ``reference_cores``
+    is the other work measured before any probe ran.
+    """
+    waited = 0.0
+    busy, target = read_busy(), read_target(pid)
+    while waited < max_s and busy is not None and target is not None and slice_s > 0:
+        sleep(slice_s)
+        waited += slice_s
+        next_busy, next_target = read_busy(), read_target(pid)
+        if next_busy is None or next_target is None:
+            break
+        used = (next_target[0] - target[0]) + (next_target[1] - target[1])
+        others = max(0.0, (next_busy - busy - used) / CLK_TCK / slice_s)
+        if others <= reference_cores + margin_cores:
+            return {"settle_s": round(waited, 3), "settled": True}
+        busy, target = next_busy, next_target
+    return {"settle_s": round(waited, 3), "settled": False}
 
 
 def baseline_cpu_pct(samples: Sequence[Optional[Dict[str, Any]]]) -> Optional[float]:

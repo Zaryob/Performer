@@ -99,6 +99,9 @@ class PreflightReport:
     smoke_data: Dict[str, bool] = field(default_factory=dict)
     smoke_warnings: Dict[str, List[str]] = field(default_factory=dict)
     cpu_before: Optional[Dict[str, object]] = None
+    #: Cores the rest of the machine used before any trial probe ran: the
+    #: level untraced samples wait to return to after tracing is torn down.
+    quiet_reference_cores: Optional[float] = None
 
     def add(self, check: Check) -> Check:
         self.checks.append(check)
@@ -542,6 +545,9 @@ def check_frame_pointers(
     )
 
 
+#: How long the machine's untraced background CPU is sampled before trials.
+QUIET_REFERENCE_S = 0.5
+
 #: Probes that record only when the target does one specific thing. A clean,
 #: silent trial is an observation that it did not, not a broken probe.
 SILENT_OK_PROBES = {
@@ -722,6 +728,8 @@ def run_preflight(
             report.smoke_data[spec.name] = False
             report.add(Check(f"smoke:{spec.name}", SKIP, f"not run: {reason}"))
     else:
+        if overhead_window_s > 0:
+            report.quiet_reference_cores = proc.other_cpu_cores(pid, QUIET_REFERENCE_S, sleep=sleep)
         trial_kwargs = {
             "sleep": sleep,
             "seconds": trial_seconds,
@@ -741,8 +749,16 @@ def run_preflight(
 
     if overhead_window_s > 0:
         # Sampled last, so it measures the target as it is about to be traced
-        # rather than as it was before the trial probes ran.
+        # rather than as it was before the trial probes ran -- but only once
+        # the kernel has finished tearing the trial probes down.
+        settle = (
+            proc.wait_for_quiet(pid, report.quiet_reference_cores, sleep=sleep)
+            if report.quiet_reference_cores is not None
+            else None
+        )
         report.cpu_before = proc.sample_cpu(pid, overhead_window_s, sleep=sleep)
+        if report.cpu_before is not None and settle is not None:
+            report.cpu_before.update(settle)
 
     return report
 
