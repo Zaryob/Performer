@@ -602,6 +602,20 @@ class StandardProfileTests(unittest.TestCase):
         overhead = self._measured_overhead(result)
         self.assertLess(overhead, 15.0, f"estimated overhead {overhead}%")
 
+    def test_bundle_with_settled_cpu_samples_validates(self):
+        """The untraced samples carry their settle wait into meta/target.json."""
+        with spawn_target(threads=8, seconds=90) as target, fake_bpftrace("normal"):
+            result = collect(
+                self._options(target.pid, duration_s=1.0, overhead_window_s=0.5),
+                printer=quiet,
+            )
+        with Bundle.open(result.archive) as bundle:
+            meta = bundle.read_json(layout.META_TARGET)
+            self.assertIn("settled", meta["cpu_before"])
+            self.assertIn("settle_s", meta["cpu_after"])
+            report = bundle.validate(verify_hashes=True)
+            self.assertTrue(report.ok, report)
+
     def test_overhead_is_not_inflated_by_probe_startup(self):
         """The CPU window and the clock must open at the same instant.
 

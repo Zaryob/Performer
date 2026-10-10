@@ -177,7 +177,8 @@ CPU level measured before any probe ran (`other_cpu_cores_reference`, waits in
 kernel frees its programs and maps on kworker threads; on a Pi 5 that took
 over a core for seconds and cut a lock-bound target to a quarter of its CPU,
 so a sample taken then is not untraced. If that level does not return the
-estimate is `null` with a note.
+estimate is `null` with a note. The raw samples in `meta/target.json`
+carry the same wait as `settle_s` and `settled`.
 An unavailable or unreliable version 2 estimate is `null`, never `0`. Some
 version 1 bundles wrote `0` in this case; readers use the accompanying quality
 note to distinguish it from a measured zero.
