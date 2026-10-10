@@ -42,7 +42,15 @@
         "window_s": { "type": "number", "minimum": 0 },
         "utime_ticks": { "type": "integer", "minimum": 0 },
         "stime_ticks": { "type": "integer", "minimum": 0 },
-        "cpu_pct": { "type": "number", "minimum": 0 }
+        "cpu_pct": { "type": "number", "minimum": 0 },
+        "settle_s": {
+          "description": "Seconds waited, before sampling, for other CPU (such as kernel probe teardown) to return to its untraced level.",
+          "type": "number", "minimum": 0
+        },
+        "settled": {
+          "description": "False when that level had not returned within the limit; the sample is then not an untraced baseline.",
+          "type": "boolean"
+        }
       }
     }
   }
