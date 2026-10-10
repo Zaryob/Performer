@@ -95,7 +95,7 @@ def summarise(results: Dict[str, Any]) -> Dict[str, Any]:
     for run in results.get("runs", []):
         group = out.setdefault(run["workload"], {}).setdefault(run["mode"], {
             "throughput": [], "cpu_us_per_iteration": [], "failed": [], "events_lost": [],
-            "outside_window_s": [],
+            "outside_window_s": [], "self_estimate": [], "self_estimate_missing": 0,
         })
         metrics = run.get("metrics")
         if run.get("error") or not metrics:
@@ -108,6 +108,11 @@ def summarise(results: Dict[str, Any]) -> Dict[str, Any]:
             group["events_lost"].append(run["events_lost"])
         if run.get("outside_window_s") is not None:
             group["outside_window_s"].append(run["outside_window_s"])
+        if "self_estimated_overhead_pct" in run:
+            if run["self_estimated_overhead_pct"] is None:
+                group["self_estimate_missing"] += 1
+            else:
+                group["self_estimate"].append(run["self_estimated_overhead_pct"])
 
     summary: Dict[str, Any] = {}
     for workload, modes in out.items():
@@ -123,6 +128,8 @@ def summarise(results: Dict[str, Any]) -> Dict[str, Any]:
                 "failed_runs": group["failed"],
                 "events_lost_total": sum(group["events_lost"]) if group["events_lost"] else None,
                 "outside_window_s": _stats(group["outside_window_s"]),
+                "self_estimate_pct": _stats(group["self_estimate"]),
+                "self_estimate_missing": group["self_estimate_missing"],
             }
             if mode != "baseline" and base and tput and base["median"] > 0:
                 row["throughput_change_pct"] = (tput["median"] / base["median"] - 1) * 100
@@ -141,10 +148,18 @@ def _signed(value: Optional[float]) -> str:
     return "—" if value is None else f"{value:+.1f}%"
 
 
+def _self_estimate(row: Dict[str, Any]) -> str:
+    stats, missing = row.get("self_estimate_pct"), row.get("self_estimate_missing", 0)
+    if stats is None and not missing:
+        return "—"
+    value = "—" if stats is None else f"{stats['median']:.1f}%"
+    return f"{value} ({missing})"
+
+
 def markdown(results: Dict[str, Any], summary: Dict[str, Any]) -> str:
     lines = ["| Workload | Mode | Runs ok/failed | Throughput/s median [IQR] | Δ throughput | "
-             "CPU µs/iter median | Δ CPU/iter | Events lost |",
-             "|---|---|---:|---:|---:|---:|---:|---:|"]
+             "CPU µs/iter median | Δ CPU/iter | Events lost | Self-estimate median (missing) |",
+             "|---|---|---:|---:|---:|---:|---:|---:|---:|"]
     order = ["baseline", "performer", "perf"]
     for workload, rows in summary.items():
         for mode in sorted(rows, key=lambda m: order.index(m) if m in order else len(order)):
@@ -159,7 +174,7 @@ def markdown(results: Dict[str, Any], summary: Dict[str, Any]) -> str:
                 + _fmt(c["median"] if c else None, 2)
                 + f" | {_signed(row.get('cpu_per_iteration_change_pct'))} | "
                 + ("—" if row["events_lost_total"] is None else str(row["events_lost_total"]))
-                + " |"
+                + " | " + _self_estimate(row) + " |"
             )
     failures = [
         f"- {workload}/{mode} round {f['round']}: {f['error']}"

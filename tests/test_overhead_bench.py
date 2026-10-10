@@ -59,6 +59,19 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(rows["performer"]["events_lost_total"], 2)
         self.assertEqual(rows["baseline"]["throughput"]["n"], 3)
 
+    def test_self_estimates_are_summarised_with_missing_ones_counted(self):
+        a = run("lock", "performer", 0, 9, 1)
+        a["self_estimated_overhead_pct"] = 10.0
+        b = run("lock", "performer", 1, 9, 1)
+        b["self_estimated_overhead_pct"] = None
+        results = {"runs": [run("lock", "baseline", 0, 10, 1), a, b]}
+        summary = bench.summarise(results)
+        row = summary["lock"]["performer"]
+        self.assertEqual(row["self_estimate_pct"]["median"], 10.0)
+        self.assertEqual(row["self_estimate_missing"], 1)
+        self.assertIn("| 10.0% (1) |", bench.markdown(results, summary))
+        self.assertTrue(bench.markdown(results, summary).splitlines()[2].endswith("| — |"))
+
     def test_failed_runs_are_reported_not_dropped(self):
         results = {"runs": [
             run("io", "baseline", 0, 50, 1),
