@@ -530,12 +530,18 @@ class _interrupt_guard:
     The probes live in their own process groups, so a terminal Ctrl-C reaches
     only the collector.  That is deliberate: the collector must be the one to
     SIGINT bpftrace, in the right order, or the maps are never written.
+
+    SIGTERM -- ``kill``, ``timeout``, ``docker stop``, a service manager --
+    gets the same clean stop. Dying on it would leave every probe attached to
+    the target until its watchdog fired and lose the bundle.
     """
+
+    SIGNALS = (signal.SIGINT, signal.SIGTERM)
 
     def __init__(self, event: threading.Event, printer: Printer) -> None:
         self.event = event
         self.printer = printer
-        self._previous = None
+        self._previous: Dict[int, Any] = {}
 
     def __enter__(self) -> "_interrupt_guard":
         def _handler(_signum, _frame):
@@ -548,18 +554,20 @@ class _interrupt_guard:
                 )
             self.event.set()
 
-        try:
-            self._previous = signal.signal(signal.SIGINT, _handler)
-        except ValueError:  # pragma: no cover - not the main thread
-            self._previous = None
+        for signum in self.SIGNALS:
+            try:
+                self._previous[signum] = signal.signal(signum, _handler)
+            except ValueError:  # pragma: no cover - not the main thread
+                pass
         return self
 
     def __exit__(self, *exc_info: Any) -> None:
-        if self._previous is not None:
+        for signum, previous in self._previous.items():
             try:
-                signal.signal(signal.SIGINT, self._previous)
+                signal.signal(signum, previous)
             except ValueError:  # pragma: no cover
                 pass
+        self._previous = {}
 
 
 def _launch_probes(

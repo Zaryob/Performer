@@ -754,3 +754,26 @@ class InterruptGuardTests(unittest.TestCase):
         self.assertEqual(len(messages), 2)
         self.assertIn("interrupted", messages[0])
         self.assertIn("already stopping", messages[1])
+
+    def test_sigterm_stops_cleanly_instead_of_orphaning_the_probes(self):
+        """kill, timeout and service managers send SIGTERM, not Ctrl-C.
+
+        Dying on it would leave every bpftrace attached to the target until
+        its watchdog fires, and lose the bundle.
+        """
+        import os
+        import signal
+        import threading
+        import time
+
+        from performer.collect import _interrupt_guard
+
+        before = signal.getsignal(signal.SIGTERM)
+        event = threading.Event()
+        messages = []
+        with _interrupt_guard(event, messages.append):
+            os.kill(os.getpid(), signal.SIGTERM)
+            time.sleep(0.05)
+        self.assertTrue(event.is_set())
+        self.assertIn("interrupted", messages[0])
+        self.assertIs(signal.getsignal(signal.SIGTERM), before)
