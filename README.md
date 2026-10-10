@@ -42,7 +42,7 @@ GitLab CI çıktılarında üretilir; kurulunca komut `performer` olarak kullan�
 
 ## Ayrıntılar
 
-Docker veya eBPF olmadan denemek için [doğrulanmış sentetik paket çiftini](docs/examples/README.md) kullanın. [Yerel doğrulama kaydı](docs/VALIDATION.md) test sonuçlarını ve kalan Linux/eBPF doğrulama boşluklarını ayırır. Sentetik veriler gerçek ölçüm doğruluğu veya overhead kanıtı değildir.
+Docker veya eBPF olmadan denemek için [doğrulanmış sentetik paket çiftini](docs/examples/README.md) kullanın. [Yerel doğrulama kaydı](docs/VALIDATION.md) test sonuçlarını ve kalan Linux/eBPF doğrulama boşluklarını ayırır. Sentetik veriler gerçek ölçüm doğruluğu veya overhead kanıtı değildir. Gerçek donanımda ölçülen maliyet için [overhead ölçümüne](docs/validation/overhead-2026-10-10/README.md) bakın.
 
 - [Ayrıntılı teknik rehber](docs/guide.en.md)
 - [Docker demo ve gereksinimleri](docs/docker-demo.md)

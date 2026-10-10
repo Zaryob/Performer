@@ -1,0 +1,1736 @@
+{
+  "environment": {
+    "recorded_at": "2026-10-10T00:27:02.967955Z",
+    "kernel": "6.12.47+rpt-rpi-2712",
+    "os_release": "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"13\"\nVERSION=\"13 (trixie)\"\nVERSION_CODENAME=trixie\nDEBIAN_VERSION_FULL=13.2\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\"",
+    "machine": "aarch64",
+    "cpu_model": "Cortex-A76",
+    "online_cpus": 4,
+    "cpu_governor": "ondemand",
+    "memory": "MemTotal:        8256512 kB",
+    "python": "3.13.5",
+    "bpftrace": "bpftrace v0.23.2",
+    "perf": "perf version 6.12.47",
+    "euid": 0,
+    "perf_event_paranoid": "2",
+    "kptr_restrict": "0",
+    "io_dir": "/home/zaryob/performer-io",
+    "io_dir_filesystem": "ext4 /dev/nvme0n1p2",
+    "tool_versions": {
+      "performer": "0.2.0",
+      "performer_commit": null,
+      "performer_source_sha256": "e9195ba334c7811440cc04fe7cfc22dcd8f95978c19b6096ec4d273a0a9247fe"
+    },
+    "settings": {
+      "duration_s": 10.0,
+      "settle_s": 2.0,
+      "rounds": 7,
+      "threads": 4,
+      "sample_hz": 99,
+      "profile": "standard",
+      "workloads": {
+        "cpu": [
+          "--contention",
+          "0",
+          "--sleep-us",
+          "0",
+          "--work",
+          "200"
+        ],
+        "lock": [
+          "--contention",
+          "90",
+          "--hold-us",
+          "50",
+          "--sleep-us",
+          "0",
+          "--work",
+          "50"
+        ],
+        "io": [
+          "--contention",
+          "0",
+          "--sleep-us",
+          "0",
+          "--work",
+          "10",
+          "--io-kb",
+          "16"
+        ]
+      },
+      "modes": [
+        "baseline",
+        "performer",
+        "perf"
+      ],
+      "report_ms": 100,
+      "perf_event": "cpu-clock",
+      "perf_call_graph": "fp"
+    }
+  },
+  "runs": [
+    {
+      "workload": "cpu",
+      "mode": "baseline",
+      "round": 0,
+      "started_at": "2026-10-10T00:27:03.006937Z",
+      "pid": 32851,
+      "window": {
+        "start_ns": 25241268102585,
+        "end_ns": 25251268172708,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000070123,
+        "iterations": 2963857.472670717,
+        "throughput_per_s": 296383.66893587005,
+        "cpu_cores": 3.9663430379793483,
+        "cpu_us_per_iteration": 13.382461497355864
+      },
+      "ended_at": "2026-10-10T00:27:15.119890Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "performer",
+      "round": 0,
+      "started_at": "2026-10-10T00:27:15.120194Z",
+      "pid": 32883,
+      "bundle": "bundles/performer-20261010T002751Z-cpu-r0.tgz",
+      "window": {
+        "start_ns": 25287806570242,
+        "end_ns": 25297806570242,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 0.0,
+      "quality_notes": [],
+      "collector_wall_s": 53.41128375899643,
+      "outside_window_s": 43.41128375899643,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 2969793.0401962595,
+        "throughput_per_s": 296979.30401962594,
+        "cpu_cores": 3.977708753073454,
+        "cpu_us_per_iteration": 13.393892096974495
+      },
+      "ended_at": "2026-10-10T00:28:08.555001Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "perf",
+      "round": 0,
+      "started_at": "2026-10-10T00:28:08.555246Z",
+      "pid": 32931,
+      "window": {
+        "start_ns": 25306816214721,
+        "end_ns": 25316816214721,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/cpu-r0.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 2973058.226464268,
+        "throughput_per_s": 297305.8226464268,
+        "cpu_cores": 3.9798705493591826,
+        "cpu_us_per_iteration": 13.386453430117559
+      },
+      "ended_at": "2026-10-10T00:28:21.739801Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "baseline",
+      "round": 0,
+      "started_at": "2026-10-10T00:28:21.740055Z",
+      "pid": 32953,
+      "window": {
+        "start_ns": 25319991389187,
+        "end_ns": 25329991519403,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000130216,
+        "iterations": 217208.03943281533,
+        "throughput_per_s": 21720.52110734388,
+        "cpu_cores": 1.0521234690802588,
+        "cpu_us_per_iteration": 48.439144893467926
+      },
+      "ended_at": "2026-10-10T00:28:33.843372Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "performer",
+      "round": 0,
+      "started_at": "2026-10-10T00:28:33.843648Z",
+      "pid": 32959,
+      "bundle": "bundles/performer-20261010T002905Z-lock-r0.tgz",
+      "window": {
+        "start_ns": 25361792226146,
+        "end_ns": 25371792226146,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 8.9,
+      "quality_notes": [],
+      "collector_wall_s": 48.30988386399986,
+      "outside_window_s": 38.30988386399986,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 212581.08070417284,
+        "throughput_per_s": 21258.108070417285,
+        "cpu_cores": 1.137231881413451,
+        "cpu_us_per_iteration": 53.496382540082166
+      },
+      "ended_at": "2026-10-10T00:29:22.159812Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "perf",
+      "round": 0,
+      "started_at": "2026-10-10T00:29:22.160078Z",
+      "pid": 33018,
+      "window": {
+        "start_ns": 25380411349139,
+        "end_ns": 25390411349139,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/lock-r0.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 216867.68196871964,
+        "throughput_per_s": 21686.768196871963,
+        "cpu_cores": 1.0677617017759624,
+        "cpu_us_per_iteration": 49.235630319965026
+      },
+      "ended_at": "2026-10-10T00:29:35.266533Z"
+    },
+    {
+      "workload": "io",
+      "mode": "baseline",
+      "round": 0,
+      "started_at": "2026-10-10T00:29:35.266873Z",
+      "pid": 33027,
+      "window": {
+        "start_ns": 25393518592832,
+        "end_ns": 25403518668585,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000075753,
+        "iterations": 27551.36143562128,
+        "throughput_per_s": 2755.115272737402,
+        "cpu_cores": 0.049352504032189506,
+        "cpu_us_per_iteration": 17.913045062232296
+      },
+      "ended_at": "2026-10-10T00:29:47.376646Z"
+    },
+    {
+      "workload": "io",
+      "mode": "performer",
+      "round": 0,
+      "started_at": "2026-10-10T00:29:47.377099Z",
+      "pid": 33034,
+      "bundle": "bundles/performer-20261010T003019Z-io-r0.tgz",
+      "window": {
+        "start_ns": 25435453612830,
+        "end_ns": 25445453612830,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 22.0,
+      "quality_notes": [],
+      "collector_wall_s": 48.26167945999987,
+      "outside_window_s": 38.26167945999987,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 27373.522913202993,
+        "throughput_per_s": 2737.352291320299,
+        "cpu_cores": 0.06674258147945471,
+        "cpu_us_per_iteration": 24.382167282992633
+      },
+      "ended_at": "2026-10-10T00:30:35.648482Z"
+    },
+    {
+      "workload": "io",
+      "mode": "perf",
+      "round": 0,
+      "started_at": "2026-10-10T00:30:35.648807Z",
+      "pid": 33237,
+      "window": {
+        "start_ns": 25453900178739,
+        "end_ns": 25463900178739,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/io-r0.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 28507.039552641872,
+        "throughput_per_s": 2850.7039552641872,
+        "cpu_cores": 0.07242841352653767,
+        "cpu_us_per_iteration": 25.407202804342205
+      },
+      "ended_at": "2026-10-10T00:30:48.759696Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "performer",
+      "round": 1,
+      "started_at": "2026-10-10T00:30:48.760170Z",
+      "pid": 33247,
+      "bundle": "bundles/performer-20261010T003125Z-cpu-r1.tgz",
+      "window": {
+        "start_ns": 25501671883184,
+        "end_ns": 25511671883184,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 0.0,
+      "quality_notes": [],
+      "collector_wall_s": 52.993837851001445,
+      "outside_window_s": 42.993837851001445,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 2969991.8406192046,
+        "throughput_per_s": 296999.18406192044,
+        "cpu_cores": 3.9773427142872877,
+        "cpu_us_per_iteration": 13.391763101470554
+      },
+      "ended_at": "2026-10-10T00:31:41.777520Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "perf",
+      "round": 1,
+      "started_at": "2026-10-10T00:31:41.777844Z",
+      "pid": 33305,
+      "window": {
+        "start_ns": 25520040106623,
+        "end_ns": 25530040106623,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/cpu-r1.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 2974524.2684164806,
+        "throughput_per_s": 297452.42684164806,
+        "cpu_cores": 3.98096664333831,
+        "cpu_us_per_iteration": 13.383540640795038
+      },
+      "ended_at": "2026-10-10T00:31:54.971696Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "baseline",
+      "round": 1,
+      "started_at": "2026-10-10T00:31:54.972059Z",
+      "pid": 33315,
+      "window": {
+        "start_ns": 25533236076458,
+        "end_ns": 25543236140420,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000063962,
+        "iterations": 2976083.2315069893,
+        "throughput_per_s": 297606.4196005179,
+        "cpu_cores": 3.9819715357287535,
+        "cpu_us_per_iteration": 13.379992075015792
+      },
+      "ended_at": "2026-10-10T00:32:07.087800Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "performer",
+      "round": 1,
+      "started_at": "2026-10-10T00:32:07.088188Z",
+      "pid": 33321,
+      "bundle": "bundles/performer-20261010T003239Z-lock-r1.tgz",
+      "window": {
+        "start_ns": 25575272963275,
+        "end_ns": 25585272963275,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 8.1,
+      "quality_notes": [],
+      "collector_wall_s": 48.550223247999384,
+      "outside_window_s": 38.550223247999384,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 213114.7098692006,
+        "throughput_per_s": 21311.47098692006,
+        "cpu_cores": 1.1351653927131333,
+        "cpu_us_per_iteration": 53.265464097238635
+      },
+      "ended_at": "2026-10-10T00:32:55.645584Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "perf",
+      "round": 1,
+      "started_at": "2026-10-10T00:32:55.645938Z",
+      "pid": 33387,
+      "window": {
+        "start_ns": 25593897225833,
+        "end_ns": 25603897225833,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/lock-r1.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 216895.82883306028,
+        "throughput_per_s": 21689.58288330603,
+        "cpu_cores": 1.0668281501076087,
+        "cpu_us_per_iteration": 49.18619946945691
+      },
+      "ended_at": "2026-10-10T00:33:08.752542Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "baseline",
+      "round": 1,
+      "started_at": "2026-10-10T00:33:08.752925Z",
+      "pid": 33396,
+      "window": {
+        "start_ns": 25607008114228,
+        "end_ns": 25617009143973,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.001029745,
+        "iterations": 217160.91118303005,
+        "throughput_per_s": 21713.855144926383,
+        "cpu_cores": 1.0515884162040248,
+        "cpu_us_per_iteration": 48.42937420302985
+      },
+      "ended_at": "2026-10-10T00:33:20.860923Z"
+    },
+    {
+      "workload": "io",
+      "mode": "performer",
+      "round": 1,
+      "started_at": "2026-10-10T00:33:20.861413Z",
+      "pid": 33415,
+      "bundle": "bundles/performer-20261010T003352Z-io-r1.tgz",
+      "window": {
+        "start_ns": 25648491797614,
+        "end_ns": 25658491797614,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 14.0,
+      "quality_notes": [],
+      "collector_wall_s": 47.528052615998604,
+      "outside_window_s": 37.528052615998604,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 28397.27979219456,
+        "throughput_per_s": 2839.727979219456,
+        "cpu_cores": 0.0691371824885426,
+        "cpu_us_per_iteration": 24.346410288053736
+      },
+      "ended_at": "2026-10-10T00:34:08.398895Z"
+    },
+    {
+      "workload": "io",
+      "mode": "perf",
+      "round": 1,
+      "started_at": "2026-10-10T00:34:08.399313Z",
+      "pid": 33459,
+      "window": {
+        "start_ns": 25666650852066,
+        "end_ns": 25676650852066,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/io-r1.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 28234.04753641517,
+        "throughput_per_s": 2823.4047536415173,
+        "cpu_cores": 0.06269482494333138,
+        "cpu_us_per_iteration": 22.205397530223056
+      },
+      "ended_at": "2026-10-10T00:34:21.498602Z"
+    },
+    {
+      "workload": "io",
+      "mode": "baseline",
+      "round": 1,
+      "started_at": "2026-10-10T00:34:21.499027Z",
+      "pid": 33481,
+      "window": {
+        "start_ns": 25679750492940,
+        "end_ns": 25689750562198,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000069258,
+        "iterations": 27370.648276124768,
+        "throughput_per_s": 2737.045871380181,
+        "cpu_cores": 0.048785917273511,
+        "cpu_us_per_iteration": 17.824296546740097
+      },
+      "ended_at": "2026-10-10T00:34:33.604341Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "perf",
+      "round": 2,
+      "started_at": "2026-10-10T00:34:33.604792Z",
+      "pid": 33487,
+      "window": {
+        "start_ns": 25691864106729,
+        "end_ns": 25701864106729,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/cpu-r2.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 2972564.4271218306,
+        "throughput_per_s": 297256.44271218305,
+        "cpu_cores": 3.9788178230420455,
+        "cpu_us_per_iteration": 13.385135698789595
+      },
+      "ended_at": "2026-10-10T00:34:46.784760Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "baseline",
+      "round": 2,
+      "started_at": "2026-10-10T00:34:46.785209Z",
+      "pid": 33497,
+      "window": {
+        "start_ns": 25705048079409,
+        "end_ns": 25715048148631,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000069222,
+        "iterations": 2977692.754314815,
+        "throughput_per_s": 297767.21422727115,
+        "cpu_cores": 3.98317822419347,
+        "cpu_us_per_iteration": 13.376819320186488
+      },
+      "ended_at": "2026-10-10T00:34:58.899821Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "performer",
+      "round": 2,
+      "started_at": "2026-10-10T00:34:58.900291Z",
+      "pid": 33503,
+      "bundle": "bundles/performer-20261010T003535Z-cpu-r2.tgz",
+      "window": {
+        "start_ns": 25751709493388,
+        "end_ns": 25761709493388,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 0.0,
+      "quality_notes": [],
+      "collector_wall_s": 53.173818385999766,
+      "outside_window_s": 43.173818385999766,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 2969260.5041300077,
+        "throughput_per_s": 296926.05041300075,
+        "cpu_cores": 3.9760705749738583,
+        "cpu_us_per_iteration": 13.390777163012329
+      },
+      "ended_at": "2026-10-10T00:35:52.097307Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "perf",
+      "round": 2,
+      "started_at": "2026-10-10T00:35:52.097747Z",
+      "pid": 33562,
+      "window": {
+        "start_ns": 25770349056322,
+        "end_ns": 25780349056322,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/lock-r2.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 216820.88946793924,
+        "throughput_per_s": 21682.088946793923,
+        "cpu_cores": 1.069716545053421,
+        "cpu_us_per_iteration": 49.33641530935594
+      },
+      "ended_at": "2026-10-10T00:36:05.210387Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "baseline",
+      "round": 2,
+      "started_at": "2026-10-10T00:36:05.210838Z",
+      "pid": 33571,
+      "window": {
+        "start_ns": 25783462062654,
+        "end_ns": 25793462125264,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.00006261,
+        "iterations": 217057.88492629048,
+        "throughput_per_s": 21705.652593538158,
+        "cpu_cores": 1.0518155536935325,
+        "cpu_us_per_iteration": 48.45814007023503
+      },
+      "ended_at": "2026-10-10T00:36:17.313787Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "performer",
+      "round": 2,
+      "started_at": "2026-10-10T00:36:17.314286Z",
+      "pid": 33590,
+      "bundle": "bundles/performer-20261010T003649Z-lock-r2.tgz",
+      "window": {
+        "start_ns": 25825497942003,
+        "end_ns": 25835497942003,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 8.29,
+      "quality_notes": [],
+      "collector_wall_s": 48.07611222500054,
+      "outside_window_s": 38.07611222500054,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 212995.68584527925,
+        "throughput_per_s": 21299.568584527926,
+        "cpu_cores": 1.1373780294749616,
+        "cpu_us_per_iteration": 53.39911111162865
+      },
+      "ended_at": "2026-10-10T00:37:05.397382Z"
+    },
+    {
+      "workload": "io",
+      "mode": "perf",
+      "round": 2,
+      "started_at": "2026-10-10T00:37:05.397843Z",
+      "pid": 33636,
+      "window": {
+        "start_ns": 25843649397637,
+        "end_ns": 25853649397637,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/io-r2.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 34923.23002602381,
+        "throughput_per_s": 3492.323002602381,
+        "cpu_cores": 0.0647182819120797,
+        "cpu_us_per_iteration": 18.53158538424237
+      },
+      "ended_at": "2026-10-10T00:37:18.502054Z"
+    },
+    {
+      "workload": "io",
+      "mode": "baseline",
+      "round": 2,
+      "started_at": "2026-10-10T00:37:18.502568Z",
+      "pid": 33658,
+      "window": {
+        "start_ns": 25856754077370,
+        "end_ns": 25866754152018,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000074648,
+        "iterations": 29617.80314719891,
+        "throughput_per_s": 2961.7582057872364,
+        "cpu_cores": 0.05527325248717551,
+        "cpu_us_per_iteration": 18.662310913555434
+      },
+      "ended_at": "2026-10-10T00:37:30.608073Z"
+    },
+    {
+      "workload": "io",
+      "mode": "performer",
+      "round": 2,
+      "started_at": "2026-10-10T00:37:30.608768Z",
+      "pid": 33664,
+      "bundle": "bundles/performer-20261010T003801Z-io-r2.tgz",
+      "window": {
+        "start_ns": 25898234600758,
+        "end_ns": 25908234600758,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 22.0,
+      "quality_notes": [],
+      "collector_wall_s": 47.723773052999604,
+      "outside_window_s": 37.723773052999604,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 28091.384567823174,
+        "throughput_per_s": 2809.1384567823175,
+        "cpu_cores": 0.06164972527731877,
+        "cpu_us_per_iteration": 21.94613267582918
+      },
+      "ended_at": "2026-10-10T00:38:18.342291Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "baseline",
+      "round": 3,
+      "started_at": "2026-10-10T00:38:18.342823Z",
+      "pid": 33723,
+      "window": {
+        "start_ns": 25916598405411,
+        "end_ns": 25926598470818,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000065407,
+        "iterations": 2976194.949434398,
+        "throughput_per_s": 297617.5483163416,
+        "cpu_cores": 3.9813380598156214,
+        "cpu_us_per_iteration": 13.37736327154945
+      },
+      "ended_at": "2026-10-10T00:38:30.450129Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "performer",
+      "round": 3,
+      "started_at": "2026-10-10T00:38:30.450686Z",
+      "pid": 33729,
+      "bundle": "bundles/performer-20261010T003908Z-cpu-r3.tgz",
+      "window": {
+        "start_ns": 25964484659753,
+        "end_ns": 25974484659753,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 0.0,
+      "quality_notes": [],
+      "collector_wall_s": 54.357175460998405,
+      "outside_window_s": 44.357175460998405,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 2963099.7731946614,
+        "throughput_per_s": 296309.9773194661,
+        "cpu_cores": 3.9679517218458633,
+        "cpu_us_per_iteration": 13.39121874241792
+      },
+      "ended_at": "2026-10-10T00:39:24.828697Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "perf",
+      "round": 3,
+      "started_at": "2026-10-10T00:39:24.829220Z",
+      "pid": 33850,
+      "window": {
+        "start_ns": 25983092097354,
+        "end_ns": 25993092097354,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/cpu-r3.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 2974752.010114493,
+        "throughput_per_s": 297475.2010114493,
+        "cpu_cores": 3.9816177781462585,
+        "cpu_us_per_iteration": 13.384704891729827
+      },
+      "ended_at": "2026-10-10T00:39:37.956568Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "baseline",
+      "round": 3,
+      "started_at": "2026-10-10T00:39:37.957130Z",
+      "pid": 33859,
+      "window": {
+        "start_ns": 25996208389518,
+        "end_ns": 26006208455388,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.00006587,
+        "iterations": 217198.7245458409,
+        "throughput_per_s": 21719.72938672662,
+        "cpu_cores": 1.051568893400064,
+        "cpu_us_per_iteration": 48.415377313250495
+      },
+      "ended_at": "2026-10-10T00:39:50.060117Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "performer",
+      "round": 3,
+      "started_at": "2026-10-10T00:39:50.060691Z",
+      "pid": 33866,
+      "bundle": "bundles/performer-20261010T004021Z-lock-r3.tgz",
+      "window": {
+        "start_ns": 26038158414109,
+        "end_ns": 26048158414109,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 8.61,
+      "quality_notes": [],
+      "collector_wall_s": 48.356905138,
+      "outside_window_s": 38.356905138,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 213091.9327428257,
+        "throughput_per_s": 21309.19327428257,
+        "cpu_cores": 1.1360068291186993,
+        "cpu_us_per_iteration": 53.31064458877061
+      },
+      "ended_at": "2026-10-10T00:40:38.424733Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "perf",
+      "round": 3,
+      "started_at": "2026-10-10T00:40:38.425271Z",
+      "pid": 33922,
+      "window": {
+        "start_ns": 26056676551304,
+        "end_ns": 26066676551304,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/lock-r3.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 216675.2072719567,
+        "throughput_per_s": 21667.520727195668,
+        "cpu_cores": 1.0669462389517592,
+        "cpu_us_per_iteration": 49.241731547652215
+      },
+      "ended_at": "2026-10-10T00:40:51.534444Z"
+    },
+    {
+      "workload": "io",
+      "mode": "baseline",
+      "round": 3,
+      "started_at": "2026-10-10T00:40:51.535159Z",
+      "pid": 33932,
+      "window": {
+        "start_ns": 26069786912678,
+        "end_ns": 26079786986103,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000073425,
+        "iterations": 28533.527561808805,
+        "throughput_per_s": 2853.331805592098,
+        "cpu_cores": 0.051824493611434985,
+        "cpu_us_per_iteration": 18.162799541878318
+      },
+      "ended_at": "2026-10-10T00:41:03.640977Z"
+    },
+    {
+      "workload": "io",
+      "mode": "performer",
+      "round": 3,
+      "started_at": "2026-10-10T00:41:03.641863Z",
+      "pid": 33938,
+      "bundle": "bundles/performer-20261010T004135Z-io-r3.tgz",
+      "window": {
+        "start_ns": 26111374205135,
+        "end_ns": 26121374205135,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 24.0,
+      "quality_notes": [],
+      "collector_wall_s": 47.61736865200146,
+      "outside_window_s": 37.61736865200146,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 27937.634437792498,
+        "throughput_per_s": 2793.76344377925,
+        "cpu_cores": 0.06476501390092564,
+        "cpu_us_per_iteration": 23.18199633012417
+      },
+      "ended_at": "2026-10-10T00:41:51.269094Z"
+    },
+    {
+      "workload": "io",
+      "mode": "perf",
+      "round": 3,
+      "started_at": "2026-10-10T00:41:51.269693Z",
+      "pid": 33996,
+      "window": {
+        "start_ns": 26129521389026,
+        "end_ns": 26139521389026,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/io-r3.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 27650.870864381697,
+        "throughput_per_s": 2765.0870864381695,
+        "cpu_cores": 0.05874439889671936,
+        "cpu_us_per_iteration": 21.24504475278231
+      },
+      "ended_at": "2026-10-10T00:42:04.374587Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "performer",
+      "round": 4,
+      "started_at": "2026-10-10T00:42:04.375479Z",
+      "pid": 34005,
+      "bundle": "bundles/performer-20261010T004241Z-cpu-r4.tgz",
+      "window": {
+        "start_ns": 26177276188463,
+        "end_ns": 26187276188463,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 0.0,
+      "quality_notes": [],
+      "collector_wall_s": 53.32226798600095,
+      "outside_window_s": 43.32226798600095,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 2968298.8284327723,
+        "throughput_per_s": 296829.88284327724,
+        "cpu_cores": 3.9757611963311126,
+        "cpu_us_per_iteration": 13.394073259228652
+      },
+      "ended_at": "2026-10-10T00:42:57.721839Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "perf",
+      "round": 4,
+      "started_at": "2026-10-10T00:42:57.722443Z",
+      "pid": 34067,
+      "window": {
+        "start_ns": 26195984095453,
+        "end_ns": 26205984095453,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/cpu-r4.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 2974847.478351225,
+        "throughput_per_s": 297484.7478351225,
+        "cpu_cores": 3.9815399350098177,
+        "cpu_us_per_iteration": 13.384013681321706
+      },
+      "ended_at": "2026-10-10T00:43:10.910481Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "baseline",
+      "round": 4,
+      "started_at": "2026-10-10T00:43:10.911135Z",
+      "pid": 34076,
+      "window": {
+        "start_ns": 26209172077042,
+        "end_ns": 26219172141671,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000064629,
+        "iterations": 2967686.485500545,
+        "throughput_per_s": 296766.7305763514,
+        "cpu_cores": 3.9716719702464016,
+        "cpu_us_per_iteration": 13.38314427137101
+      },
+      "ended_at": "2026-10-10T00:43:23.023838Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "performer",
+      "round": 4,
+      "started_at": "2026-10-10T00:43:23.024519Z",
+      "pid": 34095,
+      "bundle": "bundles/performer-20261010T004354Z-lock-r4.tgz",
+      "window": {
+        "start_ns": 26250845735354,
+        "end_ns": 26260845735354,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 8.61,
+      "quality_notes": [],
+      "collector_wall_s": 47.91855418900013,
+      "outside_window_s": 37.91855418900013,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 213078.097315829,
+        "throughput_per_s": 21307.8097315829,
+        "cpu_cores": 1.1345324038444224,
+        "cpu_us_per_iteration": 53.24490964281485
+      },
+      "ended_at": "2026-10-10T00:44:10.950322Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "perf",
+      "round": 4,
+      "started_at": "2026-10-10T00:44:10.950954Z",
+      "pid": 34142,
+      "window": {
+        "start_ns": 26269202213381,
+        "end_ns": 26279202213381,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/lock-r4.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 216847.37250411062,
+        "throughput_per_s": 21684.73725041106,
+        "cpu_cores": 1.065926141132838,
+        "cpu_us_per_iteration": 49.1555940394266
+      },
+      "ended_at": "2026-10-10T00:44:24.063880Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "baseline",
+      "round": 4,
+      "started_at": "2026-10-10T00:44:24.064718Z",
+      "pid": 34164,
+      "window": {
+        "start_ns": 26282316259348,
+        "end_ns": 26292316323995,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000064647,
+        "iterations": 217256.5887799328,
+        "throughput_per_s": 21725.51842903429,
+        "cpu_cores": 1.052271021095164,
+        "cpu_us_per_iteration": 48.434794526647245
+      },
+      "ended_at": "2026-10-10T00:44:36.168275Z"
+    },
+    {
+      "workload": "io",
+      "mode": "performer",
+      "round": 4,
+      "started_at": "2026-10-10T00:44:36.169130Z",
+      "pid": 34170,
+      "bundle": "bundles/performer-20261010T004507Z-io-r4.tgz",
+      "window": {
+        "start_ns": 26323959806207,
+        "end_ns": 26333959806207,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": null,
+      "quality_notes": [
+        "the target's untraced CPU differed by 27% between the samples taken before and after the run; its own load was not steady, so the overhead estimate is unreliable"
+      ],
+      "collector_wall_s": 47.89464973199938,
+      "outside_window_s": 37.89464973199938,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 28392.966890369382,
+        "throughput_per_s": 2839.296689036938,
+        "cpu_cores": 0.060088610186442994,
+        "cpu_us_per_iteration": 21.163202288248524
+      },
+      "ended_at": "2026-10-10T00:45:24.073198Z"
+    },
+    {
+      "workload": "io",
+      "mode": "perf",
+      "round": 4,
+      "started_at": "2026-10-10T00:45:24.073897Z",
+      "pid": 34373,
+      "window": {
+        "start_ns": 26342325580949,
+        "end_ns": 26352325580949,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/io-r4.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 27424.95852329464,
+        "throughput_per_s": 2742.495852329464,
+        "cpu_cores": 0.05868799424343156,
+        "cpu_us_per_iteration": 21.39948331866472
+      },
+      "ended_at": "2026-10-10T00:45:37.174826Z"
+    },
+    {
+      "workload": "io",
+      "mode": "baseline",
+      "round": 4,
+      "started_at": "2026-10-10T00:45:37.175549Z",
+      "pid": 34382,
+      "window": {
+        "start_ns": 26355427104999,
+        "end_ns": 26365427185128,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000080129,
+        "iterations": 27988.995752068793,
+        "throughput_per_s": 2798.877148084179,
+        "cpu_cores": 0.06156265831253958,
+        "cpu_us_per_iteration": 21.99548428007245
+      },
+      "ended_at": "2026-10-10T00:45:49.281255Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "perf",
+      "round": 5,
+      "started_at": "2026-10-10T00:45:49.282332Z",
+      "pid": 34389,
+      "window": {
+        "start_ns": 26367544152177,
+        "end_ns": 26377544152177,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/cpu-r5.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 2975056.4155194126,
+        "throughput_per_s": 297505.6415519413,
+        "cpu_cores": 3.9816369025652194,
+        "cpu_us_per_iteration": 13.38339966191891
+      },
+      "ended_at": "2026-10-10T00:46:02.502494Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "baseline",
+      "round": 5,
+      "started_at": "2026-10-10T00:46:02.503236Z",
+      "pid": 34398,
+      "window": {
+        "start_ns": 26380760556580,
+        "end_ns": 26390760622542,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000065962,
+        "iterations": 2976115.0671155467,
+        "throughput_per_s": 297609.543619483,
+        "cpu_cores": 3.979752178958676,
+        "cpu_us_per_iteration": 13.372394347834149
+      },
+      "ended_at": "2026-10-10T00:46:14.612315Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "performer",
+      "round": 5,
+      "started_at": "2026-10-10T00:46:14.613070Z",
+      "pid": 34405,
+      "bundle": "bundles/performer-20261010T004651Z-cpu-r5.tgz",
+      "window": {
+        "start_ns": 26427769386001,
+        "end_ns": 26437769386001,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 0.0,
+      "quality_notes": [],
+      "collector_wall_s": 53.13044538499889,
+      "outside_window_s": 43.13044538499889,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 2970166.7585678697,
+        "throughput_per_s": 297016.67585678695,
+        "cpu_cores": 3.9778170318311568,
+        "cpu_us_per_iteration": 13.392571377874916
+      },
+      "ended_at": "2026-10-10T00:47:07.762670Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "perf",
+      "round": 5,
+      "started_at": "2026-10-10T00:47:07.763395Z",
+      "pid": 34462,
+      "window": {
+        "start_ns": 26446014703176,
+        "end_ns": 26456014703176,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/lock-r5.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 216342.1418372253,
+        "throughput_per_s": 21634.214183722528,
+        "cpu_cores": 1.065928320826289,
+        "cpu_us_per_iteration": 49.2704894097003
+      },
+      "ended_at": "2026-10-10T00:47:20.862093Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "baseline",
+      "round": 5,
+      "started_at": "2026-10-10T00:47:20.862844Z",
+      "pid": 34484,
+      "window": {
+        "start_ns": 26459114357050,
+        "end_ns": 26469114419420,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.00006237,
+        "iterations": 217233.13122736345,
+        "throughput_per_s": 21723.177635277432,
+        "cpu_cores": 1.0526280520927953,
+        "cpu_us_per_iteration": 48.456449133085215
+      },
+      "ended_at": "2026-10-10T00:47:32.966131Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "performer",
+      "round": 5,
+      "started_at": "2026-10-10T00:47:32.966923Z",
+      "pid": 34490,
+      "bundle": "bundles/performer-20261010T004804Z-lock-r5.tgz",
+      "window": {
+        "start_ns": 26500854723577,
+        "end_ns": 26510854723577,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 8.29,
+      "quality_notes": [],
+      "collector_wall_s": 48.11192383600064,
+      "outside_window_s": 38.11192383600064,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 212898.90553038102,
+        "throughput_per_s": 21289.8905530381,
+        "cpu_cores": 1.1384163701748111,
+        "cpu_us_per_iteration": 53.47215700046693
+      },
+      "ended_at": "2026-10-10T00:48:21.088646Z"
+    },
+    {
+      "workload": "io",
+      "mode": "perf",
+      "round": 5,
+      "started_at": "2026-10-10T00:48:21.089400Z",
+      "pid": 34552,
+      "window": {
+        "start_ns": 26519340983144,
+        "end_ns": 26529340983144,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/io-r5.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 29276.41654885182,
+        "throughput_per_s": 2927.641654885182,
+        "cpu_cores": 0.07093431954388661,
+        "cpu_us_per_iteration": 24.229167331842927
+      },
+      "ended_at": "2026-10-10T00:48:34.192516Z"
+    },
+    {
+      "workload": "io",
+      "mode": "baseline",
+      "round": 5,
+      "started_at": "2026-10-10T00:48:34.193662Z",
+      "pid": 34561,
+      "window": {
+        "start_ns": 26532445621137,
+        "end_ns": 26542445698655,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000077518,
+        "iterations": 30099.871815066108,
+        "throughput_per_s": 3009.9638488688474,
+        "cpu_cores": 0.05414344245334915,
+        "cpu_us_per_iteration": 17.988070678555296
+      },
+      "ended_at": "2026-10-10T00:48:46.299652Z"
+    },
+    {
+      "workload": "io",
+      "mode": "performer",
+      "round": 5,
+      "started_at": "2026-10-10T00:48:46.300835Z",
+      "pid": 34568,
+      "bundle": "bundles/performer-20261010T004917Z-io-r5.tgz",
+      "window": {
+        "start_ns": 26573815838640,
+        "end_ns": 26583815838640,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": null,
+      "quality_notes": [
+        "the target's untraced CPU differed by 33% between the samples taken before and after the run; its own load was not steady, so the overhead estimate is unreliable"
+      ],
+      "collector_wall_s": 47.357711921999,
+      "outside_window_s": 37.357711921999,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 28985.771190568645,
+        "throughput_per_s": 2898.5771190568644,
+        "cpu_cores": 0.061691858323305274,
+        "cpu_us_per_iteration": 21.283497312425656
+      },
+      "ended_at": "2026-10-10T00:49:33.668258Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "baseline",
+      "round": 6,
+      "started_at": "2026-10-10T00:49:33.669087Z",
+      "pid": 34626,
+      "window": {
+        "start_ns": 26591932112089,
+        "end_ns": 26601932178125,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000066036,
+        "iterations": 2974707.573061903,
+        "throughput_per_s": 297468.79294126923,
+        "cpu_cores": 3.9804202057312192,
+        "cpu_us_per_iteration": 13.38096734912658
+      },
+      "ended_at": "2026-10-10T00:49:45.783844Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "performer",
+      "round": 6,
+      "started_at": "2026-10-10T00:49:45.784676Z",
+      "pid": 34633,
+      "bundle": "bundles/performer-20261010T005023Z-cpu-r6.tgz",
+      "window": {
+        "start_ns": 26639414308622,
+        "end_ns": 26649414308622,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 0.0,
+      "quality_notes": [],
+      "collector_wall_s": 53.65677239899742,
+      "outside_window_s": 43.65677239899742,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 2970434.813201761,
+        "throughput_per_s": 297043.4813201761,
+        "cpu_cores": 3.977018603086023,
+        "cpu_us_per_iteration": 13.388674901770658
+      },
+      "ended_at": "2026-10-10T00:50:39.464371Z"
+    },
+    {
+      "workload": "cpu",
+      "mode": "perf",
+      "round": 6,
+      "started_at": "2026-10-10T00:50:39.465161Z",
+      "pid": 34693,
+      "window": {
+        "start_ns": 26657728107558,
+        "end_ns": 26667728107558,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/cpu-r6.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 2972386.7057841797,
+        "throughput_per_s": 297238.67057841795,
+        "cpu_cores": 3.9792541378376236,
+        "cpu_us_per_iteration": 13.387403900354247
+      },
+      "ended_at": "2026-10-10T00:50:52.591793Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "baseline",
+      "round": 6,
+      "started_at": "2026-10-10T00:50:52.592626Z",
+      "pid": 34703,
+      "window": {
+        "start_ns": 26670844021312,
+        "end_ns": 26680844084071,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000062759,
+        "iterations": 217165.61153598138,
+        "throughput_per_s": 21716.424863487337,
+        "cpu_cores": 1.0524932587887856,
+        "cpu_us_per_iteration": 48.46530980144817
+      },
+      "ended_at": "2026-10-10T00:51:04.696219Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "performer",
+      "round": 6,
+      "started_at": "2026-10-10T00:51:04.697086Z",
+      "pid": 34709,
+      "bundle": "bundles/performer-20261010T005136Z-lock-r6.tgz",
+      "window": {
+        "start_ns": 26713148085491,
+        "end_ns": 26723148085491,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 8.52,
+      "quality_notes": [],
+      "collector_wall_s": 48.639571894000255,
+      "outside_window_s": 38.639571894000255,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 213180.59163009573,
+        "throughput_per_s": 21318.059163009573,
+        "cpu_cores": 1.1343004101222778,
+        "cpu_us_per_iteration": 53.208427720778644
+      },
+      "ended_at": "2026-10-10T00:51:53.346808Z"
+    },
+    {
+      "workload": "lock",
+      "mode": "perf",
+      "round": 6,
+      "started_at": "2026-10-10T00:51:53.347638Z",
+      "pid": 34769,
+      "window": {
+        "start_ns": 26731598951875,
+        "end_ns": 26741598951875,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/lock-r6.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 216213.4346344587,
+        "throughput_per_s": 21621.34346344587,
+        "cpu_cores": 1.0747225651968353,
+        "cpu_us_per_iteration": 49.70655810605919
+      },
+      "ended_at": "2026-10-10T00:52:06.446166Z"
+    },
+    {
+      "workload": "io",
+      "mode": "baseline",
+      "round": 6,
+      "started_at": "2026-10-10T00:52:06.447021Z",
+      "pid": 34778,
+      "window": {
+        "start_ns": 26744698467619,
+        "end_ns": 26754698536433,
+        "source": "harness clock"
+      },
+      "metrics": {
+        "window_s": 10.000068814,
+        "iterations": 28128.52136250577,
+        "throughput_per_s": 2812.8327800230845,
+        "cpu_cores": 0.0593617986945886,
+        "cpu_us_per_iteration": 21.10392026009503
+      },
+      "ended_at": "2026-10-10T00:52:18.552558Z"
+    },
+    {
+      "workload": "io",
+      "mode": "performer",
+      "round": 6,
+      "started_at": "2026-10-10T00:52:18.553864Z",
+      "pid": 34785,
+      "bundle": "bundles/performer-20261010T005249Z-io-r6.tgz",
+      "window": {
+        "start_ns": 26786118448120,
+        "end_ns": 26796118448120,
+        "source": "meta/window.json",
+        "certified": true
+      },
+      "status": "ok",
+      "probes": {
+        "oncpu": "ok",
+        "runqlat": "ok",
+        "threadlife": "ok",
+        "offcpu": "ok",
+        "futex": "ok",
+        "wakeup": "ok"
+      },
+      "events_lost": 0,
+      "self_estimated_overhead_pct": 24.0,
+      "quality_notes": [],
+      "collector_wall_s": 47.95292960699953,
+      "outside_window_s": 37.95292960699953,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 27447.40252663147,
+        "throughput_per_s": 2744.740252663147,
+        "cpu_cores": 0.06385067272387243,
+        "cpu_us_per_iteration": 23.26291992909706
+      },
+      "ended_at": "2026-10-10T00:53:06.516958Z"
+    },
+    {
+      "workload": "io",
+      "mode": "perf",
+      "round": 6,
+      "started_at": "2026-10-10T00:53:06.517844Z",
+      "pid": 34842,
+      "window": {
+        "start_ns": 26804769456409,
+        "end_ns": 26814769456409,
+        "source": "harness clock after perf launch"
+      },
+      "perf_data": "perf/io-r6.data",
+      "events_lost": 0,
+      "outside_window_s": 2.5,
+      "metrics": {
+        "window_s": 10.0,
+        "iterations": 27545.051818947086,
+        "throughput_per_s": 2754.5051818947086,
+        "cpu_cores": 0.06876653148202262,
+        "cpu_us_per_iteration": 24.965112403499276
+      },
+      "ended_at": "2026-10-10T00:53:19.619634Z"
+    }
+  ]
+}

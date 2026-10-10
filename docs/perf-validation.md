@@ -34,6 +34,9 @@ counters, with snapshot offsets recorded in the bundle.
 
 Concurrent profiling affects overhead. Run Performer separately to assess
 overhead; the paired capture is evidence about coverage and stack quality.
+`tests/docker/overhead-bench.py` does that, alternating untraced, Performer
+and perf runs. See the
+[10 October measurement](validation/overhead-2026-10-10/README.md).
 
 ## Verified capture — 9 October 2026
 
