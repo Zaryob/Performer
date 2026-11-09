@@ -521,6 +521,7 @@ def wait_for_run(
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
     started_at: Optional[float] = None,
+    stop_requested: Optional[Callable[[], bool]] = None,
 ) -> WaitOutcome:
     """Block until the run should end, and say why.
 
@@ -538,5 +539,7 @@ def wait_for_run(
             return WaitOutcome("interrupted", elapsed)
         if probes and all(not p.alive for p in probes if p.started):
             return WaitOutcome("probes_exited", elapsed)
+        if stop_requested is not None and stop_requested():
+            return WaitOutcome("controlled_stop", monotonic() - started)
         remaining = duration_s - elapsed if duration_s is not None else poll_s
         sleep(min(poll_s, max(0.0, remaining)))

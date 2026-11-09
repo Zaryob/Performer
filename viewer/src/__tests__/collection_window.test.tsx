@@ -35,6 +35,16 @@ describe("collection timing evidence", () => {
     expect(html).toContain("20.000 s · boottime · certified");
     expect(html).toContain("per-thread counters are enabled in a batch");
   });
+  it("shows controlled capture delays without claiming exact breakpoint boundaries", () => {
+    const run = bundle({ ...timing, control: { mode: "local debugger control",
+      start_client_ns: "750000000", stop_client_ns: "20990000000" } });
+    expect(collectionTiming(run)).toMatchObject({ controlled: true, startRequestDelayMs: 250, stopRequestDelayMs: 10 });
+    const html = renderToStaticMarkup(<Overview bundle={run} />);
+    expect(html).toContain("not exact breakpoint timestamps");
+    expect(html).toContain("250.00 ms after start request");
+    expect(html).toContain("10.00 ms after stop request");
+    expect(html).toContain("unknown (no CPU samples)");
+  });
   it("warns on failed acknowledgement even when the manifest says ok", () => {
     const run = bundle({ ...timing, certified: false });
     expect(bundleQualityFlags(run).some((flag) => flag.code === "capture_window")).toBe(true);

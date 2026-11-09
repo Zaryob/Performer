@@ -8,6 +8,9 @@ export interface CollectionTiming {
   clock?: string;
   pmuEnableMs?: [number, number];
   pmuDisableMs?: [number, number];
+  controlled?: boolean;
+  startRequestDelayMs?: number;
+  stopRequestDelayMs?: number;
 }
 const timestamp = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 && Number.isInteger(value);
@@ -24,6 +27,19 @@ export function collectionTiming(bundle: Bundle): CollectionTiming {
       clock: doc.clock,
     };
     const pmu = doc.pmu;
+    const control = doc.control;
+    if (control && typeof control === "object" && (control as Record<string, unknown>).mode === "local debugger control") {
+      result.controlled = true;
+      const c = control as Record<string, unknown>;
+      if (typeof c.start_client_ns === "string" && /^\d{1,20}$/.test(c.start_client_ns)) {
+        const delay = (doc.start_ns - Number(c.start_client_ns)) / 1e6;
+        if (delay >= 0) result.startRequestDelayMs = delay;
+      }
+      if (typeof c.stop_client_ns === "string" && /^\d{1,20}$/.test(c.stop_client_ns)) {
+        const delay = (doc.end_ns - Number(c.stop_client_ns)) / 1e6;
+        if (delay >= 0) result.stopRequestDelayMs = delay;
+      }
+    }
     if (pmu && typeof pmu === "object") {
       const p = pmu as Record<string, unknown>;
       if (timestamp(p.enable_begin_ns) && timestamp(p.enable_end_ns) && p.enable_end_ns >= p.enable_begin_ns)

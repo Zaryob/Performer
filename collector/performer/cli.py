@@ -74,6 +74,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     collect.add_argument("--pid", type=int, required=True, help="target process id")
     collect.add_argument("--kernel-config", type=Path, help="JSON configuration for additional system-wide kernel module tracing")
+    collect.add_argument("--control-socket", type=Path, help="prepare probes with recording off, then accept local start/stop commands on this Unix socket")
+    collect.add_argument("--control-timeout", type=float, default=300.0, metavar="S", help="maximum wait for a controlled capture start (default 300; at most 3600)")
     collect.add_argument(
         "--oncpu-hz", type=_oncpu_hz, default=profiles.DEFAULT_ONCPU_HZ,
         metavar="HZ", help="on-CPU samples per CPU-second (1-4000; default 99)",
@@ -132,6 +134,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="optional hardware counters (default: off)",
     )
     collect.set_defaults(func=_cmd_collect)
+
+    control = sub.add_parser("control", help="start, stop or inspect a prepared capture")
+    control.add_argument("action", choices=("status", "start", "stop"))
+    control.add_argument("--socket", type=Path, required=True)
+    control.add_argument("--pid", type=int, default=None, help="refuse to control a different target PID")
+    control.set_defaults(func=_cmd_control)
 
     preflight = sub.add_parser(
         "preflight",
@@ -381,6 +389,8 @@ def _cmd_collect(args: argparse.Namespace) -> int:
         pmu=args.pmu,
         oncpu_hz=args.oncpu_hz,
         kernel_config=args.kernel_config,
+        control_socket=args.control_socket,
+        control_timeout_s=args.control_timeout,
     )
     result = collect(options)
     print()
@@ -389,6 +399,12 @@ def _cmd_collect(args: argparse.Namespace) -> int:
         print(f"bundle:        {result.archive}")
     print(f"status:        {result.manifest['status']}")
     print(f"inspect with:  {PROG} inspect {result.archive or result.run_dir}")
+    return EXIT_OK
+
+
+def _cmd_control(args: argparse.Namespace) -> int:
+    from .control import request
+    print(json.dumps(request(args.socket, args.action, pid=args.pid)))
     return EXIT_OK
 
 

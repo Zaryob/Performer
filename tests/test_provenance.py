@@ -24,7 +24,7 @@ class SourceIdentityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             previous = provenance.source_fingerprint(root)
-            for folder, name in (('probes', 'oncpu.bt'), ('schema', 'manifest.schema.json'), ('collector/profiles', 'light.yaml')):
+            for folder, name in (('probes', 'oncpu.bt'), ('schema', 'manifest.schema.json'), ('collector/profiles', 'light.yaml'), ('debugger', 'performer-gdb.py')):
                 (root/folder).mkdir(parents=True, exist_ok=True)
                 (root/folder/name).write_text('changed')
                 current = provenance.source_fingerprint(root)

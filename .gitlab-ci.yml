@@ -11,7 +11,7 @@ stages:
     - if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
   script:
     - apt-get update
-    - apt-get install -y bpftrace g++ make python3
+    - apt-get install -y bpftrace g++ gdb make python3
     - make check
 
 .collector-deb:

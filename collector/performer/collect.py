@@ -25,12 +25,13 @@ import signal
 import threading
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from . import emit, layout, manifest as manifest_mod, preflight as preflight_mod
 from . import pmu as pmu_mod, proc, profiles, symbols, window, kernel
+from .control import CaptureControl, STOP_LEAD_NS, ACK_GRACE_NS
 from . import __version__
 from .bundle import BundleBuilder
 from .errors import PerformerError, PreflightError
@@ -69,6 +70,8 @@ class CollectOptions:
     pmu: str = "off"
     oncpu_hz: int = profiles.DEFAULT_ONCPU_HZ
     kernel_config: Optional[Path] = None
+    control_socket: Optional[Path] = None
+    control_timeout_s: float = 300.0
     #: Trial durations used by preflight. Shortened by the test suite; there
     #: is no CLI flag because a shorter trial measures stack quality worse.
     preflight_trial_s: float = preflight_mod.TRIAL_S
@@ -96,12 +99,21 @@ def collect(
     profiles.validate_oncpu_hz(options.oncpu_hz)
     if options.pmu not in ("off", "basic"):
         raise PerformerError(f"unknown PMU mode {options.pmu!r}")
+    controller = None
+    if options.control_socket is not None:
+        if not 0 < options.control_timeout_s <= 3600:
+            raise PerformerError("--control-timeout must be greater than zero and at most 3600 seconds")
+        # Paused/debugged targets cannot provide an untraced overhead baseline.
+        options = replace(options, overhead_window_s=0.0)
+        controller = CaptureControl(options.control_socket, options.pid)
     pmu_session = pmu_mod.Session(options.pid) if options.pmu == "basic" else None
     try:
-        return _collect(options, printer=printer, cancel=cancel, pmu_session=pmu_session)
+        return _collect(options, printer=printer, cancel=cancel, pmu_session=pmu_session, controller=controller)
     finally:
         if pmu_session is not None:
             pmu_session.close()
+        if controller is not None:
+            controller.close()
 
 
 def _collect(
@@ -110,6 +122,7 @@ def _collect(
     printer: Printer,
     cancel: Optional[threading.Event],
     pmu_session: Optional[pmu_mod.Session],
+    controller: Optional[CaptureControl] = None,
 ) -> CollectResult:
     """Measure a process and write a run bundle.
 
@@ -138,7 +151,15 @@ def _collect(
         trial_seconds=options.preflight_trial_s,
         attach_grace_s=options.preflight_attach_grace_s,
         oncpu_hz=options.oncpu_hz,
+        skip_trials=controller is not None,
     )
+    if controller is not None:
+        # Eligibility is not a passed smoke test: skipped checks remain in
+        # preflight.json, and actual attachment is proved by each BPF timer.
+        for spec in profile.probes:
+            report.smoke[spec.name] = True
+        report.add(preflight_mod.Check("debugger_capture", preflight_mod.WARN,
+            "target may be stopped: stack quality is checked from captured samples, not preflight trials"))
     printer(preflight_mod.render(report))
 
     blocking = _blocking_failures(report, options)
@@ -153,7 +174,7 @@ def _collect(
             + _override_hint(blocking)
         )
     kernel_ready = kernel_config is not None and report.smoke.get("kernel", False)
-    if not report.data_probes and not kernel_ready and pmu_session is None:
+    if not report.data_probes and not kernel_ready and pmu_session is None and controller is None:
         causes = []
         for check in report.checks:
             if not check.name.startswith("smoke:"):
@@ -216,10 +237,13 @@ def _collect(
     window_notes: List[str] = []
     pmu_bounds: Dict[str, int] = {}
 
-    def arm_bounds(begin: int, end: int, deadline: int, *, sealed: bool = False) -> None:
+    def arm_bounds(begin: int, end: int, deadline: int, *, sealed: bool = False,
+                   before_ns: Optional[int] = None) -> None:
         # Only test doubles read this file. Real probes receive bounds from
         # the collector's private, harmless prctl control event.
         control_clock = window.signal_bounds(begin, end, control_token=control_token)
+        if before_ns is not None and control_clock[1] >= before_ns:
+            raise PerformerError("control syscall outlasted the requested closing boundary; capture cannot be certified")
         control_path.write_text(json.dumps({
             "start_ns": begin, "end_ns": end, "sealed": sealed,
             "control_clock_ns": (control_clock[0] + control_clock[1]) // 2,
@@ -236,6 +260,18 @@ def _collect(
     # that minute must not kill the collector and lose them.
     with _interrupt_guard(interrupted, printer), _collection_cleanup(launched, watcher, sampler, control_path):
         try:
+            start_connection = None
+            if controller is not None:
+                if not active and pmu_session is None:
+                    raise PreflightError("no probe attached; cannot prepare a controlled capture")
+                watcher.start()
+                controller.open()
+                printer(f"control ready: {controller.path} (waiting for start; no events recorded)")
+                start_connection = _wait_for_control_start(
+                    controller, watcher, active, interrupted, options.control_timeout_s,
+                )
+                start_ns = window.clock_now_ns() + window.ARM_LEAD_NS
+                end_ns = start_ns + int(options.duration_s * 1e9) if options.duration_s is not None else 0
             arm_bounds(start_ns, end_ns, start_ns)
             wait_until(start_ns)
             started_at = _utc_for_clock(start_ns)
@@ -247,12 +283,31 @@ def _collect(
             snapshot_start_ns = window.clock_now_ns()
             threads_start = proc.snapshot_threads(options.pid)
             snapshot_start_end_ns = window.clock_now_ns()
-            watcher.start()
+            if controller is None:
+                watcher.start()
             sampler.start()
+            if controller is not None:
+                controller.state = "recording"
+                controller.metadata["start_ack_ns"] = str(window.clock_now_ns())
+                delivered = controller.reply(start_connection, start_ns=str(start_ns), end_ns=str(end_ns))
+                controller.metadata["start_ack_delivered"] = delivered
+                if not delivered:
+                    interrupted.set()
         except Exception:
+            if controller is not None and start_connection is not None:
+                controller.reply(start_connection, error="capture failed to start; see collector output")
             stop_all([probe for _spec, probe in launched])
             control_path.unlink(missing_ok=True)
             raise
+        stop_connection = None
+        def stop_requested() -> bool:
+            nonlocal stop_connection
+            received = controller.receive()
+            if received is None:
+                return False
+            stop_connection, _command = received
+            return True
+
         outcome = wait_for_run(
             duration_s=options.duration_s,
             watcher=watcher,
@@ -260,17 +315,27 @@ def _collect(
             interrupted=interrupted,
             monotonic=lambda: window.clock_now_ns() / 1_000_000_000,
             started_at=start_ns / 1_000_000_000,
+            poll_s=0.005 if controller is not None else 0.25,
+            stop_requested=stop_requested if controller is not None else None,
         )
+        stop_error = None
         if outcome.reason != "duration":
             # Close ahead of time, so no aggregate contains already-recorded
             # events newer than a backdated cancellation timestamp.
-            closing_ns = window.clock_now_ns() + window.ARM_LEAD_NS
+            lead_ns = STOP_LEAD_NS if outcome.reason == "controlled_stop" else window.ARM_LEAD_NS
+            closing_ns = window.clock_now_ns() + lead_ns
             end_ns = min(end_ns, closing_ns) if end_ns else closing_ns
             active = [probe for probe in active if probe.alive]
             try:
-                arm_bounds(start_ns, end_ns, end_ns)
+                if outcome.reason == "controlled_stop":
+                    # Read the acknowledgement after the boundary if needed,
+                    # but prove the synchronous kernel handlers ran before it.
+                    arm_bounds(start_ns, end_ns, end_ns + ACK_GRACE_NS, before_ns=end_ns)
+                else:
+                    arm_bounds(start_ns, end_ns, end_ns)
             except PerformerError as error:
                 window_notes.append(str(error))
+                stop_error = str(error)
         wait_until(end_ns)
         elapsed = (end_ns - start_ns) / 1_000_000_000
         ended_at = started_at + _dt.timedelta(seconds=elapsed)
@@ -282,6 +347,14 @@ def _collect(
         snapshot_end_ns = window.clock_now_ns()
         threads_end = proc.snapshot_threads(options.pid)
         snapshot_end_end_ns = window.clock_now_ns()
+        if controller is not None:
+            controller.state = "finalizing"
+            controller.metadata["ended_by"] = outcome.reason
+            if stop_connection is not None:
+                controller.metadata["stop_ack_ns"] = str(window.clock_now_ns())
+                controller.metadata["stop_ack_delivered"] = controller.reply(
+                    stop_connection, error=stop_error, start_ns=str(start_ns), end_ns=str(end_ns))
+            controller.close()
         # Seal pending off-CPU waits at the same canonical boundary. A crashed
         # probe retains only its final witnessed checkpoint instead.
         active = [probe for probe in active if probe.alive]
@@ -345,6 +418,7 @@ def _collect(
         "snapshot_end_end_ns": snapshot_end_end_ns,
         "pmu": pmu_bounds or None,
         "warnings": window_notes,
+        **({"control": controller.metadata} if controller is not None else {}),
     })
     if pmu_session is not None:
         pmu_doc = pmu_session.document()
@@ -408,7 +482,14 @@ def _collect(
             if probe_result.status == "ok":
                 probe_result.status = "partial"
                 probe_result.warnings.append("shared collection boundary could not be certified; see meta/window.json")
-    if ended_by_target_exit and until_exit:
+    if controller is not None and outcome.reason != "controlled_stop":
+        note = f"controlled capture ended by {outcome.reason} before a stop command"
+        warnings.append(note)
+        for probe_result in probe_results:
+            if probe_result.status == "ok":
+                probe_result.status = "partial"
+                probe_result.warnings.append(note)
+    if ended_by_target_exit and until_exit and controller is None:
         warnings.append("target exited, ending the run as requested by --until-exit")
     elif ended_by_target_exit:
         warnings.append("target process exited before the requested duration elapsed")
@@ -428,7 +509,7 @@ def _collect(
         )
 
     died_at = None
-    if watcher.died.is_set() and watcher.died_at is not None and not until_exit:
+    if watcher.died.is_set() and watcher.died_at is not None and (not until_exit or controller is not None):
         died_at = _dt.datetime.fromtimestamp(watcher.died_at, _dt.timezone.utc).replace(
             microsecond=0
         )
@@ -479,6 +560,23 @@ def _collect(
 # --------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------
+
+
+def _wait_for_control_start(controller, watcher, probes, interrupted, timeout_s):
+    deadline = time.monotonic() + timeout_s
+    while True:
+        if interrupted.is_set():
+            raise PerformerError("controlled capture cancelled before start; no measurement was recorded")
+        if watcher.died.is_set() or not proc.is_same_process(watcher.pid, watcher.start_time_ticks):
+            raise PerformerError("target exited before the controlled capture started")
+        if any(not probe.alive for probe in probes):
+            raise PerformerError("a prepared probe exited before the controlled capture started")
+        if time.monotonic() >= deadline:
+            raise PerformerError("timed out waiting for the capture start command")
+        received = controller.receive()
+        if received is not None:
+            connection, _command = received
+            return connection
 
 
 def _check_duration(options: CollectOptions, profile: Profile) -> None:
@@ -606,7 +704,8 @@ def _launch_probes(
     # The first probe can be active while another is still attaching. Leave
     # the full attach window plus the run duration before its own watchdog.
     watchdog = (
-        int(options.duration_s + (options.attach_grace_s or ATTACH_GRACE_S) + 30)
+        int(options.duration_s + (options.attach_grace_s or ATTACH_GRACE_S) + 30
+            + (options.control_timeout_s if options.control_socket is not None else 0))
         if options.duration_s else 86400
     )
     # Probe readiness runs while data handlers stay closed. Every survivor
@@ -777,6 +876,10 @@ def _build_quality(
     cpu_after: Optional[Dict[str, Any]] = None,
 ) -> manifest_mod.Quality:
     notes: List[str] = []
+    if options.control_socket is not None:
+        notes.append("debugger-controlled capture: boundaries are acknowledged collector gates, not exact instruction timestamps; debugger and control delays can affect waiting time")
+        if not report.total_frame_samples:
+            notes.append("stack quality is unknown: no on-CPU frame samples were captured")
     frame_check = report.get("frame_pointers")
     if frame_check and frame_check.status == preflight_mod.WARN and not report.total_frame_samples:
         notes.append("stack quality could not be measured during preflight")

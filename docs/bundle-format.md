@@ -418,6 +418,25 @@ absence must not be interpreted as an empty complete event list.
 
 Usage, configuration and limitations: [kernel and thread tracing](kernel-and-threads.md).
 
+## Debugger-controlled captures
+
+`collect --control-socket PATH` prepares attached, gated probes and waits for
+an acknowledged local `start` command. `stop` closes the common window before
+maps are written. Preparation time is outside the captured interval. Trial
+profiling and overhead estimation are skipped for a potentially stopped target;
+the actual capture supplies stack quality evidence.
+
+The optional `control` object in `meta/window.json` records its mode, client
+request timestamps (when provided), collector receive/ack timestamps, stop lead
+and completion reason. These BOOTTIME nanoseconds are decimal strings. Client
+timestamps describe commands, not breakpoint instruction execution. The viewer
+shows request-to-gate delays and does not label them exact breakpoint times.
+Debugger pauses inside the interval remain part of the measurement. A safety
+timeout, operator interruption or target exit before a controlled stop marks
+the capture partial even if its common kernel window was certified.
+
+Configuration and GDB commands: [breakpoint capture](breakpoint-capture.md).
+
 ## Compatibility
 
 `schema_version` is a single integer, present in `manifest.json` and in each

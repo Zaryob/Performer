@@ -19,4 +19,6 @@ performer validate --verify-hashes "${bundles[0]}"
 performer inspect --json "${bundles[0]}" | python3 -c 'import json, sys; doc = json.load(sys.stdin); assert doc["pmu"]["mode"] == "basic"'
 
 performer collect-perf --help >/dev/null
+performer control --help >/dev/null
+test -f /usr/share/performer/debugger/performer-gdb.py
 PYTHONPATH=/usr/share/performer/collector python3 -c 'from performer.provenance import tool_versions; v=tool_versions(); assert len(v["performer_source_sha256"]) == 64; print(v)'

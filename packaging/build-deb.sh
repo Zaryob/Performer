@@ -29,6 +29,7 @@ done < <(find collector/performer -type f -name '*.py' -print0)
 build_commit=$(PYTHONPATH=collector python3 -c 'import os; from performer.provenance import tool_versions; c=tool_versions()["performer_commit"] or os.environ.get("CI_COMMIT_SHA") or os.environ.get("GITHUB_SHA"); c=c if isinstance(c,str) and len(c)==40 and all(x in "0123456789abcdef" for x in c) else None; print(repr(c))')
 printf 'BUILD_COMMIT = %s\n' "$build_commit" > "$payload/collector/performer/_build.py"
 install -Dm755 collector/bin/performer "$payload/collector/bin/performer"
+install -Dm644 debugger/performer-gdb.py "$payload/debugger/performer-gdb.py"
 for file in collector/profiles/*.yaml probes/*.bt schema/*.json; do
   install -Dm644 "$file" "$payload/$file"
 done

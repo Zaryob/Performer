@@ -11,7 +11,7 @@ def source_fingerprint(root):
     digest = hashlib.sha256()
     paths = []
     for directory, pattern in (("collector/performer", "*.py"), ("collector/profiles", "*.yaml"),
-                               ("probes", "*.bt"), ("schema", "*.json")):
+                               ("probes", "*.bt"), ("schema", "*.json"), ("debugger", "*.py")):
         paths.extend(path for path in (root / directory).rglob(pattern)
                      if path.name != "_build.py" and "__pycache__" not in path.parts)
     for path in sorted(paths):

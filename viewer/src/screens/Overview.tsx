@@ -85,13 +85,21 @@ export function Overview({ bundle }: { bundle: Bundle }) {
               ? `${timing.durationS?.toFixed(3)} s · ${timing.clock} · ${timing.state}`
               : timing.state === "missing" ? "timing evidence unavailable in this bundle" : "invalid timing evidence"}
           </Field>
+          {timing.controlled && <Field label="capture control">
+            <span className="text-amber-100">Debugger controlled · acknowledged gates, not exact breakpoint timestamps.</span>
+            {timing.startRequestDelayMs !== undefined && <> Start gate {timing.startRequestDelayMs.toFixed(2)} ms after start request.</>}
+            {timing.stopRequestDelayMs !== undefined && <> End gate {timing.stopRequestDelayMs.toFixed(2)} ms after stop request.</>}
+            <span className="text-slate-400"> Debugger pauses and command delays can affect waiting time.</span>
+          </Field>}
           {(timing.pmuEnableMs || timing.pmuDisableMs) && <Field label="PMU timing">
             {timing.pmuEnableMs && <>enable {timing.pmuEnableMs.map((n) => n.toFixed(2)).join(" to ")} ms from start; </>}
             {timing.pmuDisableMs && <>disable {timing.pmuDisableMs.map((n) => n.toFixed(2)).join(" to ")} ms from end</>}
             <span className="text-slate-400"> · per-thread counters are enabled in a batch</span>
           </Field>}
           <Field label="stack quality">
-            {quality.frame_pointers_ok ? (
+            {timing.controlled && !quality.total_frame_samples ? (
+              <span className="text-amber-200">unknown (no CPU samples)</span>
+            ) : quality.frame_pointers_ok ? (
               <span className="text-emerald-300">ok</span>
             ) : (
               <span className="text-red-300">insufficient</span>
