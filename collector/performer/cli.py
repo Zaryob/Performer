@@ -73,6 +73,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     collect.add_argument("--pid", type=int, required=True, help="target process id")
+    collect.add_argument("--kernel-config", type=Path, help="JSON configuration for additional system-wide kernel module tracing")
     collect.add_argument(
         "--oncpu-hz", type=_oncpu_hz, default=profiles.DEFAULT_ONCPU_HZ,
         metavar="HZ", help="on-CPU samples per CPU-second (1-4000; default 99)",
@@ -137,6 +138,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="run the environment checks against a target without collecting",
     )
     preflight.add_argument("--pid", type=int, required=True)
+    preflight.add_argument("--kernel-config", type=Path, help="check a kernel module tracing JSON configuration too")
     preflight.add_argument(
         "--oncpu-hz", type=_oncpu_hz, default=profiles.DEFAULT_ONCPU_HZ,
         metavar="HZ", help="on-CPU trial samples per CPU-second (1-4000; default 99)",
@@ -378,6 +380,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
         bpftrace=args.bpftrace,
         pmu=args.pmu,
         oncpu_hz=args.oncpu_hz,
+        kernel_config=args.kernel_config,
     )
     result = collect(options)
     print()
@@ -393,6 +396,11 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
     from . import preflight as preflight_mod
 
     profile = profiles.load(args.profile)
+    if args.kernel_config is not None:
+        from . import kernel
+        config = kernel.load_config(args.kernel_config)
+        kernel.check_host(config)
+        profile = kernel.extend_profile(profile, config)
     report = preflight_mod.run_preflight(
         args.pid, profile, skip_trials=args.skip_trials, bpftrace=args.bpftrace,
         oncpu_hz=args.oncpu_hz,

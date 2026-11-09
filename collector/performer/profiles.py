@@ -49,13 +49,22 @@ class ProbeSpec:
     outputs: Tuple[str, ...] = ()
     #: A probe whose failure should fail the whole run rather than degrade it.
     required: bool = False
+    # Collector-generated source only; deliberately unavailable in profile YAML.
+    source: Optional[str] = None
 
     def probe_args(self, pid: int, watchdog_s: int) -> Tuple[str, ...]:
         """Positional parameters passed to the .bt program: $1, $2, ..."""
         args = [str(pid), str(watchdog_s)]
         for value in self.thresholds.values():
             args.append(str(int(value)))
+        if self.name == "threadlife" and not self.thresholds:
+            args.append(str(thread_event_quota()))
         return tuple(args)
+
+
+def thread_event_quota() -> int:
+    """Bound event maps without a racy cross-CPU sequence counter."""
+    return max(1, 2048 // (os.cpu_count() or 1))
 
 
 @dataclass(frozen=True)
@@ -117,7 +126,7 @@ def program_path(spec: ProbeSpec) -> Path:
     if "/" in spec.program or spec.program.startswith("."):
         raise PerformerError(f"probe program must be a bare file name: {spec.program!r}")
     path = probes_dir() / spec.program
-    if not path.is_file():
+    if spec.source is None and not path.is_file():
         raise PerformerError(f"probe program not found: {path}")
     return path
 
@@ -154,7 +163,7 @@ def probe_command(
     """
     validate_oncpu_hz(oncpu_hz)
     program = program_path(spec)
-    source = program.read_text(encoding="utf-8")
+    source = spec.source if spec.source is not None else program.read_text(encoding="utf-8")
     if spec.name == "oncpu":
         if (
             len(_ANY_PROFILE_ATTACHPOINT.findall(source)) != 1
@@ -174,7 +183,7 @@ def probe_command(
             source, window_control_pid, offcpu=spec.name == "offcpu",
             control_token=window_control_token,
         )
-    if window_control_pid is not None or (spec.name == "oncpu" and oncpu_hz != DEFAULT_ONCPU_HZ):
+    if spec.source is not None or window_control_pid is not None or (spec.name == "oncpu" and oncpu_hz != DEFAULT_ONCPU_HZ):
         if generated_dir is None:
             raise PerformerError("a directory is required for a generated probe")
         destination = Path(generated_dir) / spec.program

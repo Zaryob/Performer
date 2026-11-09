@@ -9,7 +9,7 @@ seconds, and any further `$N` are thresholds supplied by the profile.
 |---|---|---|
 | `oncpu.bt` | where CPU time goes (`profile:hz:99`) | light |
 | `runqlat.bt` | how long runnable threads wait for a CPU | light |
-| `threadlife.bt` | thread creation and exit, and lifetimes | light |
+| `threadlife.bt` | CLONE_THREAD creation/exit counts, bounded timestamped lifecycle events, and lifetimes | light |
 | `offcpu.bt` | where threads block, and for how long | standard |
 | `futex.bt` | lock contention, aggregated per `uaddr` | standard |
 | `wakeup.bt` | who wakes whom — the thread interaction graph | standard |
@@ -17,6 +17,10 @@ seconds, and any further `$N` are thresholds supplied by the profile.
 | `timers.bt` | timer arm/wait rate per call site | deep |
 
 ## Conventions
+
+Opt-in kernel module programs are generated from a validated JSON selection by
+`collector/performer/kernel.py`. They share the collection window but deliberately
+have no PID filter. See [kernel and lifecycle tracing](../docs/kernel-and-threads.md).
 
 * **Prefer tracepoints over kprobes.** They survive kernel upgrades; a kprobe
   on an inlined or renamed function does not.

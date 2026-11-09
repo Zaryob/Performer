@@ -77,14 +77,15 @@ class ShippedProfileTests(unittest.TestCase):
 
         spec = profiles.load("light").probe("threadlife")
         source = profiles.program_path(spec).read_text(encoding="utf-8")
-        for event in ("fork", "exit"):
+        for event, expected in (("task:task_newtask", "pid == $1 && (args->clone_flags & 0x10000) != 0"),
+                                ("sched:sched_process_exit", "pid == $1")):
             with self.subTest(event=event):
                 predicate = re.search(
-                    rf"tracepoint:sched:sched_process_{event}\s*/([^/]+)/",
+                    rf"tracepoint:{event}\s*/([^/]+)/",
                     source,
                 )
                 self.assertIsNotNone(predicate)
-                self.assertEqual(predicate.group(1).strip(), "pid == $1")
+                self.assertEqual(predicate.group(1).strip(), expected)
 
     def test_every_probe_reports_readiness_from_a_running_timer(self):
         """An attach banner printed by userspace cannot prove BPF is active."""

@@ -20,6 +20,7 @@ import { runDuration } from "../bundle/load";
 import type { Schedstat, ThreadsDoc } from "../bundle/types";
 import { Empty, Panel } from "../components/ui";
 import { ratio, readPmu, value } from "../pmu";
+import { ThreadLifecycle } from "../components/ThreadLifecycle";
 
 interface Row {
   key: string;
@@ -166,7 +167,7 @@ export function Threads({
   }, [rows, filter, sortKey, ascending]);
 
   if (!rows.length) {
-    return <Empty>This bundle has no thread inventory or PMU thread counts.</Empty>;
+    return <div className="space-y-4"><Empty>This bundle has no thread inventory or PMU thread counts.</Empty><ThreadLifecycle bundle={bundle} /></div>;
   }
 
   const totals = visible.reduce(
@@ -269,6 +270,7 @@ export function Threads({
         </table>
       </div>
       </Panel>
+      <ThreadLifecycle bundle={bundle} />
     </div>
   );
 }

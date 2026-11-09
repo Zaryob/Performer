@@ -119,6 +119,48 @@ class CollectTests(unittest.TestCase):
             self.assertTrue(bundle.exists(layout.SERIES_THREADS))
             self.assertTrue(bundle.exists(f"{layout.DIR_RAW}/oncpu.stderr.log"))
 
+    def test_short_lived_thread_events_are_packaged_even_without_inventory_rows(self):
+        with spawn_target(threads=4, seconds=60) as target, fake_bpftrace("normal"):
+            result = collect(self._options(target.pid, profile_name="light"), printer=quiet)
+        with Bundle.open(result.archive) as bundle:
+            self.assertTrue(bundle.validate(verify_hashes=True).ok)
+            events = bundle.read_json(layout.HIST_THREAD_EVENTS)["rows"]
+            self.assertEqual([(row[2], row[3]) for row in events], [("created", 98765), ("exited", 98765)])
+            self.assertNotIn("98765", bundle.read_json(layout.META_THREADS)["threads"])
+
+    def test_lifecycle_budget_loss_marks_probe_and_run_partial(self):
+        with spawn_target(threads=4, seconds=60) as target, fake_bpftrace("threadlife_event_loss"):
+            result = collect(self._options(target.pid, profile_name="light"), printer=quiet)
+        probe = next(item for item in result.manifest["probes"] if item["name"] == "threadlife")
+        self.assertEqual(probe["status"], "partial")
+        self.assertEqual(result.manifest["status"], "partial")
+        self.assertTrue(any("99 thread lifecycle events dropped" in warning for warning in probe["warnings"]))
+
+    def test_opt_in_module_probe_is_gated_packaged_and_validated(self):
+        config = self.tmp / "kernel.json"
+        config.write_text(json.dumps({"module": "demo", "functions": ["demo_work"], "requests": [
+            {"name": "io", "start": "demo:start", "end": "demo:done", "key": "request_id"}]}))
+        with spawn_target(threads=4, seconds=60) as target, fake_bpftrace("normal"), patch("performer.kernel.check_host"):
+            result = collect(self._options(target.pid, profile_name="light", kernel_config=config), printer=quiet)
+        self.assertEqual(result.manifest["status"], "ok")
+        with Bundle.open(result.archive) as bundle:
+            self.assertTrue(bundle.validate(verify_hashes=True).ok)
+            self.assertEqual(bundle.read_json(layout.META_KERNEL_TRACE)["scope"], "system-wide")
+            self.assertEqual(bundle.read_json(layout.HIST_KERNEL_FUNCTIONS)["rows"][0][:4], ["demo_work", 4, 4, 8.0])
+            self.assertIn("@_performer_start", bundle.read_text("raw/kernel.bt"))
+
+    def test_idle_module_can_wait_for_activity_after_preflight(self):
+        config = self.tmp / "kernel.json"
+        config.write_text(json.dumps({"module": "demo", "functions": ["demo_work"]}))
+        with spawn_target(threads=4, seconds=60) as target, fake_bpftrace("kernel_idle"), patch("performer.kernel.check_host"):
+            result = collect(self._options(target.pid, profile_name="light", kernel_config=config), printer=quiet)
+        self.assertTrue(result.preflight.ok)
+        kernel_probe = next(item for item in result.manifest["probes"] if item["name"] == "kernel")
+        self.assertEqual(kernel_probe["status"], "ok")
+        with Bundle.open(result.archive) as bundle:
+            self.assertTrue(bundle.validate(verify_hashes=True).ok)
+            self.assertEqual(bundle.read_json(layout.HIST_KERNEL_FUNCTIONS)["rows"], [])
+
     def test_explicit_bpftrace_binary_is_used_for_preflight_and_collection(self):
         with spawn_target(threads=4, seconds=60) as target, fake_bpftrace("normal") as binary:
             result = collect(self._options(target.pid, bpftrace=binary), printer=quiet)

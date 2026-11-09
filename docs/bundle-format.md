@@ -386,6 +386,38 @@ observed tracing duration (the last 100 ms witness for an early exit), while
 may include a leading attachment interval and process-lifetime probe durations;
 those older measurements cannot be made precise retroactively.
 
+## Optional kernel and thread lifecycle records
+
+`meta/kernel_trace.json` records the loaded module name, explicitly selected
+functions, tracepoints and request start/end pairs. It is governed by
+`kernel_trace.schema.json`. Its scope is `system-wide`, independent of the
+userspace target PID. Generated probe source is retained in `raw/kernel.bt`.
+
+`hist/kernel_functions.json`, `hist/kernel_requests.json` and
+`hist/kernel_tracepoints.json` use the existing table schema. Function durations
+are inclusive elapsed time for observed in-window entry/return pairs, not CPU
+time. Request latency joins start/end tracepoints on a configured scalar integer
+key across execution contexts. Unmatched endpoints and reused outstanding IDs
+are explicit columns; no duration is invented for them.
+
+`hist/thread_events.json` and `hist/kernel_events.json` are time-ordered tables.
+`timestamp_ns` is a decimal string in the `CLOCK_BOOTTIME` domain; `offset_ms`
+is elapsed milliseconds from the common capture start. Request IDs and observed
+thread `birth_ns` values are decimal strings as well, preserving all 64 bits in
+JavaScript. Thread events include event kind, TID, creator TID, observed name,
+birth timestamp and lifetime when both endpoints were observed. Null parent,
+birth or lifetime values mean unknown. A TID can have multiple birth generations;
+the event table does not merge them into one inventory row.
+
+Per-CPU event budgets bound both event maps. Dropped records keep aggregate
+counts running but set the event table's `truncated` flag and the probe's status
+to `partial`. Mismatches against the probe's retained-event counters also mark
+the list incomplete. `total_rows` counts retained rows, not all events seen by
+the kernel. Older bundles may have lifecycle aggregates without an event table;
+absence must not be interpreted as an empty complete event list.
+
+Usage, configuration and limitations: [kernel and thread tracing](kernel-and-threads.md).
+
 ## Compatibility
 
 `schema_version` is a single integer, present in `manifest.json` and in each

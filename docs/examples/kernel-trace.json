@@ -1,0 +1,13 @@
+{
+  "module": "my_driver",
+  "functions": ["my_driver_submit", "my_driver_work"],
+  "tracepoints": ["my_driver:request_queued"],
+  "requests": [
+    {
+      "name": "io",
+      "start": "my_driver:request_start",
+      "end": "my_driver:request_done",
+      "key": "request_id"
+    }
+  ]
+}

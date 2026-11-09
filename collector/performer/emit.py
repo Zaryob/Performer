@@ -39,6 +39,7 @@ class EmitResult:
     fold_stats: Optional[stack_parse.FoldStats] = None
     #: Free-form numbers worth printing while the run finishes.
     notes: List[str] = field(default_factory=list)
+    partial: bool = False
 
 
 @dataclass
@@ -573,6 +574,13 @@ def emit_threadlife(context: EmitContext, text: str) -> EmitResult:
         return result
     dump = hist_parse.parse_maps(text)
     result.warnings.extend(dump.warnings)
+    from .parse.events import thread_events
+    if "@thread_event[" in text or "@_performer_start:" in text or "@thread_events_dropped" in text:
+        document, warnings, partial = thread_events(text)
+        context.builder.add_json(layout.HIST_THREAD_EVENTS, document)
+        result.outputs.append(layout.HIST_THREAD_EVENTS)
+        result.warnings.extend(warnings)
+        result.partial = partial
 
     forks = dump.values.get("fork_cnt", [])
     exits = dict(dump.values.get("exit_cnt", []))
@@ -676,6 +684,8 @@ def _probe_to_call(probe: str) -> str:
     return tail
 
 
+from .kernel import emit as emit_kernel
+
 EMITTERS: Dict[str, Emitter] = {
     "oncpu": emit_oncpu,
     "offcpu": emit_offcpu,
@@ -685,6 +695,7 @@ EMITTERS: Dict[str, Emitter] = {
     "syscall_lat": emit_syscall_lat,
     "threadlife": emit_threadlife,
     "timers": emit_timers,
+    "kernel": emit_kernel,
 }
 
 

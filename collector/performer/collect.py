@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from . import emit, layout, manifest as manifest_mod, preflight as preflight_mod
-from . import pmu as pmu_mod, proc, profiles, symbols, window
+from . import pmu as pmu_mod, proc, profiles, symbols, window, kernel
 from . import __version__
 from .bundle import BundleBuilder
 from .errors import PerformerError, PreflightError
@@ -68,6 +68,7 @@ class CollectOptions:
     bpftrace: Optional[str] = None
     pmu: str = "off"
     oncpu_hz: int = profiles.DEFAULT_ONCPU_HZ
+    kernel_config: Optional[Path] = None
     #: Trial durations used by preflight. Shortened by the test suite; there
     #: is no CLI flag because a shorter trial measures stack quality worse.
     preflight_trial_s: float = preflight_mod.TRIAL_S
@@ -119,6 +120,12 @@ def _collect(
     data that has already been paid for.
     """
     profile = profiles.load(options.profile_name)
+    kernel_config = None
+    if options.kernel_config is not None:
+        kernel_config = kernel.load_config(options.kernel_config)
+        kernel.check_host(kernel_config)
+        profile = kernel.extend_profile(profile, kernel_config)
+        printer(f"kernel tracing: module '{kernel_config['module']}', system-wide (not filtered by target PID)")
     _check_duration(options, profile)
 
     # ---- preflight ---------------------------------------------------
@@ -145,7 +152,8 @@ def _collect(
             + "\n".join(f"  - {c.name}: {c.message}" for c in blocking)
             + _override_hint(blocking)
         )
-    if not report.data_probes and pmu_session is None:
+    kernel_ready = kernel_config is not None and report.smoke.get("kernel", False)
+    if not report.data_probes and not kernel_ready and pmu_session is None:
         causes = []
         for check in report.checks:
             if not check.name.startswith("smoke:"):
@@ -182,6 +190,12 @@ def _collect(
     )
 
     target_static = proc.target_info(options.pid)
+    if kernel_config is not None:
+        builder.add_json(layout.META_KERNEL_TRACE, {
+            "schema_version": layout.SCHEMA_VERSION,
+            "scope": "system-wide",
+            **kernel_config,
+        })
     modules_start = symbols.modules_snapshot(options.pid)
 
     watcher = TargetWatcher(options.pid)
@@ -613,7 +627,7 @@ def _launch_probes(
                 ),
                 stdout_path=builder.root / layout.DIR_RAW / f"{spec.name}.stdout.log",
                 stderr_path=builder.probe_log_path(spec.name),
-                env={**preflight_mod.bpftrace_env(), **(
+                env={**preflight_mod.bpftrace_env(spec), **(
                     {"PERFORMER_WINDOW_CONTROL": str(control_path)} if control_path else {}
                 )},
             )
@@ -641,6 +655,10 @@ def _probe_thresholds(spec: profiles.ProbeSpec, oncpu_hz: int) -> Optional[Dict[
     thresholds: Dict[str, Any] = dict(spec.thresholds)
     if spec.name == "oncpu":
         thresholds["sample_hz"] = oncpu_hz
+    if spec.name == "threadlife" and not spec.thresholds:
+        thresholds["events_per_cpu"] = profiles.thread_event_quota()
+    if spec.name == "kernel":
+        thresholds.update(events_per_cpu=profiles.thread_event_quota(), max_nesting=16, map_keys=8192)
     return thresholds or None
 
 
@@ -719,6 +737,8 @@ def _finish_probes(
             status = "partial"
             warnings.append("probe exited independently; the full shared measurement window is not guaranteed")
         elif stderr_summary.has_errors:
+            status = "partial"
+        if emitted.partial and status == "ok":
             status = "partial"
 
         # bpftrace writes its maps only on SIGINT: a probe killed any other

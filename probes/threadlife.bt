@@ -1,36 +1,44 @@
 /*
- * threadlife.bt -- thread creation and exit.
- *
- *   $1  target pid (tgid)
- *   $2  watchdog seconds
- *
- * A pool that churns is a different problem from a pool that is merely large.
- * The 1 Hz /proc series shows the thread count moving; this shows whether
- * that movement is the same threads or new ones, and which code path creates
- * them.
- * sched_process_fork runs in the creating thread. Its parent_pid is that
- * thread's TID; bpftrace's pid is the shared TGID used by the exit filter.
+ * Thread lifecycle for one TGID. $1 = TGID, $2 = watchdog seconds,
+ * $3 = retained events per CPU (collector default divides a 2048-event budget).
+ * task_newtask's CLONE_THREAD flag excludes forked child processes.
+ * Event timestamps and birth timestamps use the shared BOOTTIME clock.
+ * Counters/histograms continue after the event budget is exhausted.
  */
-
-tracepoint:sched:sched_process_fork
-/ pid == $1 /
+tracepoint:task:task_newtask
+/ pid == $1 && (args->clone_flags & 0x10000) != 0 /
 {
-    @fork_cnt[args->parent_comm] = count();
-    @_born_at[args->child_pid] = nsecs;
+    $now = nsecs;
+    @fork_cnt[comm] = count();
+    @_born_at[args->pid] = $now;
+    @_parent_tid[args->pid] = tid;
+    if (@_event_count[cpu] < $3) {
+        @thread_event[$now, 1, args->pid, tid, args->comm, $now] = 1;
+        @_event_count[cpu] = @_event_count[cpu] + 1;
+    } else {
+        @thread_events_dropped = count();
+    }
 }
 
 tracepoint:sched:sched_process_exit
 / pid == $1 /
 {
+    $now = nsecs;
     @exit_cnt[comm] = count();
-    if (@_born_at[tid]) {
-        @thread_lifetime_ms = hist((nsecs - @_born_at[tid]) / 1000000);
-        delete(@_born_at[tid]);
+    $born = @_born_at[tid];
+    if ($born && $now >= $born) {
+        @thread_lifetime_ms = hist(($now - $born) / 1000000);
     }
+    if (@_event_count[cpu] < $3) {
+        @thread_event[$now, 2, tid, @_parent_tid[tid], comm, $born] = 1;
+        @_event_count[cpu] = @_event_count[cpu] + 1;
+    } else {
+        @thread_events_dropped = count();
+    }
+    delete(@_born_at[tid]);
+    delete(@_parent_tid[tid]);
 }
 
-// The banner is printed before kernel attachment completes. This event can
-// run only after the probe is active; the collector starts its clock here.
 interval:ms:100
 {
     if (!@_performer_ready) {

@@ -8,6 +8,7 @@ import { Diff } from "./screens/Diff";
 import { Locks } from "./screens/Locks";
 import { Wakeups } from "./screens/Wakeups";
 import { Collect } from "./screens/Collect";
+import { Kernel } from "./screens/Kernel";
 import { adoptToken, api, probe, setToken, type DaemonStatus } from "./api";
 import { MIN_SUPPORTED_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSION } from "./bundle/types";
 import { Empty } from "./components/ui";
@@ -20,6 +21,7 @@ const SCREENS = [
   "Overview",
   "Flame",
   "Threads",
+  "Kernel",
   "Locks",
   "Wakeups",
   "Diff",
@@ -240,6 +242,7 @@ export function App() {
                 <Threads bundle={selected} baseline={baseline} />
               )}
               {screen === "Locks" && <Locks bundle={selected} />}
+              {screen === "Kernel" && <Kernel bundle={selected} />}
               {screen === "Wakeups" && <Wakeups bundle={selected} />}
             </>
           ) : (

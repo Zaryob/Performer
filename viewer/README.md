@@ -72,6 +72,8 @@ another screen. The thresholds live in `src/quality.ts` and mirror
 | Overview | run summary, probe table, quality block, artifacts |
 | Flame | on-CPU / off-CPU / futex, search, zoom, icicle, thread filter, hide idle |
 | Threads | every thread with CPU and runqueue time, sortable; delta columns against a baseline run |
+| Thread lifecycle (in Threads) | timestamped creation/exit events, including transient threads missing from snapshots; creator TID, observed generation and lifetime, with truncation warnings |
+| Kernel | opt-in system-wide module function durations, tracepoint counts/events and request completion latency across contexts; see [collection configuration](../docs/kernel-and-threads.md) |
 | Locks | contended mutexes ranked by wait time, each attributed to the code that takes it |
 | Wakeups | force-directed wakeup graph plus the waker ranking |
 | Diff | two runs joined on their call paths: differential flame graph, biggest movers, the paths that appeared and the paths that vanished |

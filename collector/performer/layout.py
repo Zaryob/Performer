@@ -59,6 +59,12 @@ HIST_OFFCPU_DURATION = f"{DIR_HIST}/offcpu_duration.json"
 HIST_OFFCPU_BY_STATE = f"{DIR_HIST}/offcpu_by_state.json"
 HIST_THREADLIFE = f"{DIR_HIST}/threadlife.json"
 HIST_THREAD_LIFETIME = f"{DIR_HIST}/thread_lifetime.json"
+HIST_THREAD_EVENTS = f"{DIR_HIST}/thread_events.json"
+HIST_KERNEL_FUNCTIONS = f"{DIR_HIST}/kernel_functions.json"
+HIST_KERNEL_REQUESTS = f"{DIR_HIST}/kernel_requests.json"
+HIST_KERNEL_EVENTS = f"{DIR_HIST}/kernel_events.json"
+HIST_KERNEL_TRACEPOINTS = f"{DIR_HIST}/kernel_tracepoints.json"
+META_KERNEL_TRACE = f"{DIR_META}/kernel_trace.json"
 HIST_TIMERS = f"{DIR_HIST}/timers.json"
 
 # series/ -- 1 Hz sampled time series
@@ -85,6 +91,7 @@ SCHEMA_FOR_PATH: Dict[str, str] = {
     META_THREADS: "threads.schema.json",
     GRAPH_WAKEUP_EDGES: "wakeup_edges.schema.json",
     PMU_COUNTERS: "pmu.schema.json",
+    META_KERNEL_TRACE: "kernel_trace.schema.json",
 }
 
 #: Files under ``hist/`` carry a ``kind`` discriminator instead of having one

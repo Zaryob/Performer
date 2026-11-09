@@ -237,6 +237,14 @@ TIMERS = """@timer_calls[tracepoint:syscalls:sys_enter_clock_nanosleep]: 61200
 ]: 121400
 """
 
+KERNEL = """@kernel_calls[demo_work]: 4
+@kernel_function_ns[demo_work]: count 4, average 2000, total 8000
+@kernel_function_max_ns[demo_work]: 3000
+@kernel_request_started[io]: 1
+@kernel_request_ns[io]: count 1, average 12000, total 12000
+@kernel_request_max_ns[io]: 12000
+"""
+
 #: Probe program name -> the maps that probe prints.
 OUTPUT_BY_PROBE = {
     "oncpu.bt": ONCPU,
@@ -247,6 +255,7 @@ OUTPUT_BY_PROBE = {
     "syscall_lat.bt": SYSCALL_LAT,
     "threadlife.bt": THREADLIFE,
     "timers.bt": TIMERS,
+    "kernel.bt": KERNEL,
 }
 
 _stop = False
@@ -329,7 +338,9 @@ def main(argv: list) -> int:
         return 0
 
     print()
-    if mode == "empty_stacks":
+    if mode == "kernel_idle":
+        body = ""
+    elif mode == "empty_stacks":
         body = EMPTY_STACK_OUTPUT
     else:
         # An unknown program still gets the on-CPU shape, so a test that
@@ -337,6 +348,12 @@ def main(argv: list) -> int:
         body = OUTPUT_BY_PROBE.get(program, ONCPU)
     sys.stdout.write(body.format(comm=comm))
     if control_path and last_ack:
+        if program == "threadlife.bt" and mode != "kernel_idle":
+            birth = last_ack[1] + 1
+            print(f"\n@thread_event[{birth}, 1, 98765, 123, short-worker, {birth}]: 1")
+            print(f"@thread_event[{birth + 1}, 2, 98765, 123, short-worker, {birth}]: 1")
+            if mode == "threadlife_event_loss":
+                print("@thread_events_dropped: 99")
         print(f"\n@_performer_start: {last_ack[1]}")
         print(f"@_performer_observed_end: {last_ack[2]}")
     sys.stdout.flush()

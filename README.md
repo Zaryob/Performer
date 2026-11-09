@@ -45,6 +45,7 @@ to generate a sample bundle without eBPF. Their Compose file is
 ## Details
 
 - [Detailed technical guide](docs/guide.en.md)
+- [Kernel module and thread lifecycle tracing (Turkish)](docs/kernel-and-threads.md)
 - [Docker demo and requirements](docs/docker-demo.md)
 - [Bundle format](docs/bundle-format.md)
 - [Viewer development notes](viewer/README.md)

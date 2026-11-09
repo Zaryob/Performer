@@ -122,7 +122,9 @@ class PreflightReport:
         if self.failures:
             return False
         attempted = [c for c in self.checks if c.name.startswith("smoke:") and c.status != SKIP]
-        return not attempted or bool(self.data_probes)
+        # An explicitly configured kernel probe can be idle until the user
+        # triggers I/O after collection begins. A clean attach is sufficient.
+        return not attempted or bool(self.data_probes) or self.smoke.get("kernel", False)
 
     @property
     def usable_probes(self) -> List[str]:
@@ -212,7 +214,7 @@ def check_probe_programs(profile: Profile) -> Check:
     """Check every file before running any of the profile's programs."""
     directory = profiles.probes_dir()
     missing = []
-    programs = {profiles.ONCPU.program, *(spec.program for spec in profile.probes)}
+    programs = {profiles.ONCPU.program, *(spec.program for spec in profile.probes if spec.source is None)}
     for program in sorted(programs):
         path = directory / program
         try:
@@ -431,7 +433,7 @@ def run_trial(
         argv=argv,
         stdout_path=directory / f"{spec.name}.trial.out",
         stderr_path=directory / f"{spec.name}.trial.err",
-        env=bpftrace_env(),
+        env=bpftrace_env(spec),
     )
     grace = attach_grace_s if attach_grace_s is not None else ATTACH_GRACE_S
     probe.start()
@@ -551,6 +553,7 @@ QUIET_REFERENCE_S = 0.5
 #: Probes that record only when the target does one specific thing. A clean,
 #: silent trial is an observation that it did not, not a broken probe.
 SILENT_OK_PROBES = {
+    "kernel": "no selected module activity during trial",
     "threadlife": "no thread creation or exit during trial",
     "futex": "no contended futex wait above the threshold during trial",
 }
@@ -633,7 +636,7 @@ def check_smoke(
 # --------------------------------------------------------------------------
 
 
-def bpftrace_env() -> Dict[str, str]:
+def bpftrace_env(spec: Optional[ProbeSpec] = None) -> Dict[str, str]:
     """Environment for probe processes.
 
     A full map silently truncates the data, so the key limits are raised well
@@ -648,10 +651,11 @@ def bpftrace_env() -> Dict[str, str]:
     stack map is lost.  Caching is safe here: each probe traces one
     long-running process whose address space does not move.
     """
+    keys = "8192" if spec is not None and spec.name in ("kernel", "threadlife") else "1048576"
     return {
         "BPFTRACE_CACHE_USER_SYMBOLS": "1",
-        "BPFTRACE_MAX_MAP_KEYS": "1048576",
-        "BPFTRACE_MAP_KEYS_MAX": "1048576",
+        "BPFTRACE_MAX_MAP_KEYS": keys,
+        "BPFTRACE_MAP_KEYS_MAX": keys,
         "BPFTRACE_MAX_PROBES": "1024",
         "BPFTRACE_PERF_RB_PAGES": "512",
         "BPFTRACE_STRLEN": "128",
