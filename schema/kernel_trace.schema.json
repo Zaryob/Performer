@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "System-wide kernel tracing selection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scope", "module", "functions", "tracepoints", "requests"],
+  "properties": {
+    "schema_version": {"enum": [1, 2]},
+    "scope": {"const": "system-wide"},
+    "module": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"},
+    "functions": {"type": "array", "maxItems": 32, "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.]{0,127}$"}},
+    "tracepoints": {"type": "array", "maxItems": 16, "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}:[A-Za-z_][A-Za-z0-9_]{0,63}$"}},
+    "requests": {"type": "array", "maxItems": 16, "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "start", "end", "key"],
+      "properties": {
+        "name": {"type": "string"}, "start": {"type": "string"},
+        "end": {"type": "string"}, "key": {"type": "string"}
+      }
+    }}
+  }
+}
